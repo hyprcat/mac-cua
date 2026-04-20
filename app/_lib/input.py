@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -65,7 +66,24 @@ _KEY_EVENT_DELAY = 0.003
 _MOUSE_PRESSURE = 1.0
 SCROLL_PIXEL_QUANTUM = 80
 _LINE_DELTA = 5
-_MOUSE_EVENT_NUMBER = 0
+class _MouseEventCounter:
+    """Thread-safe per-module mouse event counter.
+
+    Replaces the global _MOUSE_EVENT_NUMBER to avoid cross-session leakage.
+    Each event source should ideally have its own counter, but since CGEvent
+    doesn't expose per-source numbering, we use a thread-local counter.
+    """
+
+    def __init__(self) -> None:
+        self._local = threading.local()
+
+    def next(self) -> int:
+        val = getattr(self._local, "value", 0) + 1
+        self._local.value = val
+        return val
+
+
+_mouse_counter = _MouseEventCounter()
 
 _TEXT_KEY_ALIASES = {
     "apostrophe": "'",
@@ -215,7 +233,6 @@ def _post_click(
         raise InputError(f"Unknown mouse button: {button}")
 
     btn, down_type, up_type = _BUTTON_MAP[button]
-    global _MOUSE_EVENT_NUMBER
     src = source if source is not None else _source
 
     # Move cursor to target first — background apps need this to register
@@ -223,8 +240,7 @@ def _post_click(
     move = CGEventCreateMouseEvent(src, kCGEventMouseMoved, point, kCGMouseButtonLeft)
     if move is None:
         raise CGEventError("cg_event_creation_failed: mouseMove")
-    _MOUSE_EVENT_NUMBER += 1
-    _decorate_mouse_event(move, window_id=window_id, pressure=0.0, event_number=_MOUSE_EVENT_NUMBER)
+    _decorate_mouse_event(move, window_id=window_id, pressure=0.0, event_number=_mouse_counter.next())
     CGEventPostToPid(pid, move)
     time.sleep(0.01)  # brief settle for hit-test registration
 
@@ -235,13 +251,12 @@ def _post_click(
         down = CGEventCreateMouseEvent(src, down_type, point, btn)
         if down is None:
             raise CGEventError("cg_event_creation_failed: mouseDown")
-        _MOUSE_EVENT_NUMBER += 1
         _decorate_mouse_event(
             down,
             window_id=window_id,
             pressure=_MOUSE_PRESSURE,
             click_state=click_num,
-            event_number=_MOUSE_EVENT_NUMBER,
+            event_number=_mouse_counter.next(),
         )
         CGEventPostToPid(pid, down)
 
@@ -250,13 +265,12 @@ def _post_click(
         up = CGEventCreateMouseEvent(src, up_type, point, btn)
         if up is None:
             raise CGEventError("cg_event_creation_failed: mouseUp")
-        _MOUSE_EVENT_NUMBER += 1
         _decorate_mouse_event(
             up,
             window_id=window_id,
             pressure=0.0,
             click_state=click_num,
-            event_number=_MOUSE_EVENT_NUMBER,
+            event_number=_mouse_counter.next(),
         )
         CGEventPostToPid(pid, up)
 

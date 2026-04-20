@@ -85,7 +85,7 @@ class InputTests(unittest.TestCase):
         up = object()
 
         with (
-            patch("app._lib.input._MOUSE_EVENT_NUMBER", 0),
+            patch.object(cg_input, "_mouse_counter", cg_input._MouseEventCounter()),
             patch(
                 "app._lib.input.CGEventCreateMouseEvent",
                 side_effect=[move, down, up],
