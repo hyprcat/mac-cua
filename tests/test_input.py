@@ -143,6 +143,77 @@ class InputTests(unittest.TestCase):
         post_unicode_mock.assert_called_once_with(456, "🙂", source=None)
 
 
+class DiscreteModifierTests(unittest.TestCase):
+    def test_shift_cmd_s_produces_six_events(self) -> None:
+        """shift+cmd+s should emit: shift_down, cmd_down, s_down, s_up, cmd_up, shift_up."""
+        events_posted = []
+
+        def track_event(pid, event):
+            events_posted.append(event)
+
+        MASK_SHIFT = 1 << 17
+        MASK_COMMAND = 1 << 20
+
+        with (
+            patch("app._lib.input.CGEventCreateKeyboardEvent", side_effect=lambda src, kc, down: (kc, down)),
+            patch("app._lib.input.CGEventSetFlags"),
+            patch("app._lib.input.CGEventPostToPid", side_effect=track_event),
+            patch("app._lib.input.time.sleep"),
+        ):
+            cg_input._post_keycode_with_modifiers(123, 1, MASK_SHIFT | MASK_COMMAND)
+
+        # 6 events: shift_down, cmd_down, s_down, s_up, cmd_up, shift_up
+        self.assertEqual(len(events_posted), 6)
+        self.assertEqual(events_posted[0], (56, True))   # shift down
+        self.assertEqual(events_posted[1], (55, True))   # cmd down
+        self.assertEqual(events_posted[2], (1, True))    # s down
+        self.assertEqual(events_posted[3], (1, False))   # s up
+        self.assertEqual(events_posted[4], (55, False))  # cmd up
+        self.assertEqual(events_posted[5], (56, False))  # shift up
+
+    def test_plain_key_no_modifiers_produces_two_events(self) -> None:
+        """Return key with no modifiers: just keyDown, keyUp."""
+        events_posted = []
+
+        def track_event(pid, event):
+            events_posted.append(event)
+
+        with (
+            patch("app._lib.input.CGEventCreateKeyboardEvent", side_effect=lambda src, kc, down: (kc, down)),
+            patch("app._lib.input.CGEventSetFlags"),
+            patch("app._lib.input.CGEventPostToPid", side_effect=track_event),
+            patch("app._lib.input.time.sleep"),
+        ):
+            cg_input._post_keycode_with_modifiers(123, 36, 0)
+
+        self.assertEqual(len(events_posted), 2)
+        self.assertEqual(events_posted[0], (36, True))
+        self.assertEqual(events_posted[1], (36, False))
+
+    def test_single_modifier_cmd_c_produces_four_events(self) -> None:
+        """cmd+c: cmd_down, c_down, c_up, cmd_up."""
+        events_posted = []
+
+        def track_event(pid, event):
+            events_posted.append(event)
+
+        MASK_COMMAND = 1 << 20
+
+        with (
+            patch("app._lib.input.CGEventCreateKeyboardEvent", side_effect=lambda src, kc, down: (kc, down)),
+            patch("app._lib.input.CGEventSetFlags"),
+            patch("app._lib.input.CGEventPostToPid", side_effect=track_event),
+            patch("app._lib.input.time.sleep"),
+        ):
+            cg_input._post_keycode_with_modifiers(123, 8, MASK_COMMAND)
+
+        self.assertEqual(len(events_posted), 4)
+        self.assertEqual(events_posted[0], (55, True))   # cmd down
+        self.assertEqual(events_posted[1], (8, True))     # c down
+        self.assertEqual(events_posted[2], (8, False))    # c up
+        self.assertEqual(events_posted[3], (55, False))   # cmd up
+
+
 class EventSourceIsolationTests(unittest.TestCase):
     def test_post_key_event_uses_provided_source(self) -> None:
         custom_source = object()
