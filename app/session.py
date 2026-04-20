@@ -563,6 +563,10 @@ class SessionManager:
             self._deactivate_focus_enforcement(session)
         if feature_flags.user_interruption_detection:
             self._user_interaction_monitor.stop_monitoring()
+        # Remove delivery tap between actions — avoids Python callback overhead
+        # on every input event while idle
+        if session.delivery_tap is not None:
+            session.delivery_tap.deactivate()
         self._restore_previous_frontmost_app(session, previous_frontmost)
 
     def _track_session(self, session: AppSession, previous_window_id: int | None = None) -> None:

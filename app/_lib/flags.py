@@ -43,7 +43,7 @@ class FeatureFlags:
     personal_instructions_overrides_builtin: bool = False
     advanced_pruning: bool = True
     allow_forbidden_targets: bool = False
-    confirmed_delivery: bool = False  # DISABLED — event taps cause keyboard corruption. Enable with MAC_CUA_FLAG_CONFIRMED_DELIVERY=1
+    confirmed_delivery: bool = True  # Confirmed delivery pipeline (on-demand tap activation)
 
     @classmethod
     def load(cls, config_path: str = _DEFAULT_CONFIG_PATH) -> FeatureFlags:
