@@ -62,6 +62,21 @@ git checkout confirmed-delivery-pipeline
 
 ---
 
+## Demo
+
+> **Task:** Search Google for the population of Tokyo, calculate what percentage that is of the world population (8.1 billion), write the result in Notes, then open the Wikipedia page for Tokyo in Safari and find the mayor's name. Only CUA tools — no other tools allowed.
+
+<video src="assets/demo.mp4" width="100%" controls></video>
+
+**Result from Claude:**
+
+> 1. Searched Google for "population of Tokyo" — found approximately 14.1–14.2 million residents
+> 2. Calculated the percentage: 14.15 million / 8.1 billion = **0.17%** of the world's population
+> 3. Wrote the result in Notes — created a new note titled "Tokyo Population vs World Population"
+> 4. Opened the Wikipedia page for Tokyo in Safari and found that the leader of Tokyo is **Governor Yuriko Koike** (Tokyo has a Governor rather than a mayor, since it's officially the Tokyo Metropolitan Prefecture)
+
+---
+
 Most computer use agents take over your screen. They grab your cursor, steal window focus, and lock you out while they work. You sit and watch.
 
 **mac-cua works differently.** It sends input events directly to target processes using `CGEventPostToPid` &mdash; a macOS API that delivers clicks, keystrokes, and gestures to a specific app without moving your cursor or activating any window. The AI works in the background. You keep working in the foreground. At the same time. On the same machine.
