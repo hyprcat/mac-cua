@@ -277,5 +277,38 @@ class EventSourceIsolationTests(unittest.TestCase):
         self.assertIs(result, fake_source)
 
 
+class ScrollOverhaulTests(unittest.TestCase):
+    def test_scroll_system_removed(self) -> None:
+        self.assertFalse(hasattr(cg_input, "scroll_system"))
+
+    def test_scroll_pid_pixel_sets_both_delta_fields(self) -> None:
+        move = object()
+        scroll = object()
+
+        with (
+            patch("app._lib.input.CGEventCreateMouseEvent", return_value=move),
+            patch("app._lib.input.CGEventCreateScrollWheelEvent", return_value=scroll),
+            patch("app._lib.input.CGEventSetIntegerValueField") as set_int,
+            patch("app._lib.input.CGEventSetDoubleValueField") as set_double,
+            patch("app._lib.input.CGEventPostToPid"),
+            patch("app._lib.input._decorate_mouse_event"),
+            patch("app._lib.input.time.sleep"),
+        ):
+            cg_input.scroll_pid_pixel(123, 100.0, 200.0, "down", 80, window_id=77)
+
+        # Check integer deltas were set on the scroll event
+        int_calls_on_scroll = [(c[0][1], c[0][2]) for c in set_int.call_args_list if c[0][0] is scroll]
+        # Should have kCGScrollWheelEventPointDeltaAxis1 = -80 and Axis2 = 0
+        self.assertTrue(any(v == -80 for _, v in int_calls_on_scroll))
+        self.assertTrue(any(v == 0 for _, v in int_calls_on_scroll))
+
+        # Check fixed-point deltas were set
+        double_calls_on_scroll = [(c[0][1], c[0][2]) for c in set_double.call_args_list if c[0][0] is scroll]
+        self.assertTrue(any(v == -80.0 for _, v in double_calls_on_scroll))
+
+    def test_default_scroll_quantum_is_80_pixels(self) -> None:
+        self.assertEqual(cg_input.SCROLL_PIXEL_QUANTUM, 80)
+
+
 if __name__ == "__main__":
     unittest.main()
