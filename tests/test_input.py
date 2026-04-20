@@ -80,7 +80,7 @@ class InputTests(unittest.TestCase):
         self.assertEqual(coords, (200.0, 118.0))
 
     def test_post_click_sets_pressure_and_window_hints(self) -> None:
-        move = object()
+        """Click emits down+up only (no mouse-move pre-positioning)."""
         down = object()
         up = object()
 
@@ -88,7 +88,7 @@ class InputTests(unittest.TestCase):
             patch.object(cg_input, "_mouse_counter", cg_input._MouseEventCounter()),
             patch(
                 "app._lib.input.CGEventCreateMouseEvent",
-                side_effect=[move, down, up],
+                side_effect=[down, up],
             ),
             patch("app._lib.input.CGEventSetIntegerValueField") as set_int_mock,
             patch("app._lib.input.CGEventSetDoubleValueField") as set_double_mock,
@@ -98,20 +98,16 @@ class InputTests(unittest.TestCase):
             cg_input._post_click(456, sentinel.point, "left", 1, window_id=77)
 
         set_double_mock.assert_has_calls([
-            call(move, cg_input.kCGMouseEventPressure, 0.0),
             call(down, cg_input.kCGMouseEventPressure, cg_input._MOUSE_PRESSURE),
             call(up, cg_input.kCGMouseEventPressure, 0.0),
         ])
         set_int_mock.assert_has_calls([
-            call(move, cg_input.kCGMouseEventNumber, 1),
-            call(move, cg_input.kCGMouseEventWindowUnderMousePointer, 77),
-            call(move, cg_input.kCGMouseEventWindowUnderMousePointerThatCanHandleThisEvent, 77),
             call(down, cg_input.kCGMouseEventClickState, 1),
-            call(down, cg_input.kCGMouseEventNumber, 2),
+            call(down, cg_input.kCGMouseEventNumber, 1),
             call(down, cg_input.kCGMouseEventWindowUnderMousePointer, 77),
             call(down, cg_input.kCGMouseEventWindowUnderMousePointerThatCanHandleThisEvent, 77),
             call(up, cg_input.kCGMouseEventClickState, 1),
-            call(up, cg_input.kCGMouseEventNumber, 3),
+            call(up, cg_input.kCGMouseEventNumber, 2),
             call(up, cg_input.kCGMouseEventWindowUnderMousePointer, 77),
             call(up, cg_input.kCGMouseEventWindowUnderMousePointerThatCanHandleThisEvent, 77),
         ])
@@ -248,14 +244,13 @@ class EventSourceIsolationTests(unittest.TestCase):
 
     def test_post_click_uses_provided_source(self) -> None:
         custom_source = object()
-        move = object()
         down = object()
         up = object()
 
         with (
             patch(
                 "app._lib.input.CGEventCreateMouseEvent",
-                side_effect=[move, down, up],
+                side_effect=[down, up],
             ) as create_mock,
             patch("app._lib.input.CGEventSetIntegerValueField"),
             patch("app._lib.input.CGEventSetDoubleValueField"),
@@ -282,17 +277,13 @@ class ScrollOverhaulTests(unittest.TestCase):
         self.assertFalse(hasattr(cg_input, "scroll_system"))
 
     def test_scroll_pid_pixel_sets_both_delta_fields(self) -> None:
-        move = object()
         scroll = object()
 
         with (
-            patch("app._lib.input.CGEventCreateMouseEvent", return_value=move),
             patch("app._lib.input.CGEventCreateScrollWheelEvent", return_value=scroll),
             patch("app._lib.input.CGEventSetIntegerValueField") as set_int,
             patch("app._lib.input.CGEventSetDoubleValueField") as set_double,
             patch("app._lib.input.CGEventPostToPid"),
-            patch("app._lib.input._decorate_mouse_event"),
-            patch("app._lib.input.time.sleep"),
         ):
             cg_input.scroll_pid_pixel(123, 100.0, 200.0, "down", 80, window_id=77)
 

@@ -166,7 +166,8 @@ class TestPipelineStepOrdering(unittest.TestCase):
         dispatch_mock.assert_called_once()
         session.menu_tracker.wait_for_menu_close.assert_not_called()
 
-    def test_open_menu_skips_settle_wait(self) -> None:
+    def test_open_menu_uses_short_settle_wait(self) -> None:
+        """When a menu is open, use a short settle (0.15s) instead of skipping entirely."""
         manager = SessionManager()
         session = _make_session()
         session.tree_nodes = _make_nodes()
@@ -193,7 +194,9 @@ class TestPipelineStepOrdering(unittest.TestCase):
         ):
             manager.execute("click", {"window_id": 77, "element_index": "0"})
 
-        settle_mock.assert_not_called()
+        settle_mock.assert_called_once()
+        # Short settle — capped at 0.15s, not full timeout
+        self.assertLessEqual(settle_mock.call_args.kwargs.get("timeout", settle_mock.call_args[1].get("timeout", 999)), 0.15)
 
     def test_transient_probe_captures_snapshot_immediately_without_settle(self) -> None:
         manager = SessionManager()

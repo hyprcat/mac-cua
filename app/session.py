@@ -414,7 +414,15 @@ class SessionManager:
             )
             observer.stop()
         if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is None:
-            cgevent_monitor = CGEventOutcomeMonitor()
+            # Pass source_state_id so the monitor only counts OUR events, not user input
+            _source_id = None
+            if session.event_source is not None:
+                try:
+                    from Quartz import CGEventSourceGetSourceStateID
+                    _source_id = CGEventSourceGetSourceStateID(session.event_source)
+                except Exception:
+                    pass
+            cgevent_monitor = CGEventOutcomeMonitor(source_state_id=_source_id)
             cgevent_monitor.start()
             session.cgevent_outcome_monitor = cgevent_monitor
 
@@ -699,10 +707,10 @@ class SessionManager:
                     )
                     and tool not in ("get_app_state", "list_apps")
                 ):
-                    # Leave background menus responsive for the next tool call
-                    # instead of idling long enough for user activity to dismiss them.
-                    logger.debug("Skipping settle wait for %s while menu is open", tool)
-                    settle_timeout = 0.0
+                    # Use a short settle for open menus/transients rather than skipping entirely.
+                    # Zero settle causes popovers and context menus to persist as visible artifacts.
+                    logger.debug("Short settle for %s while menu/transient is open", tool)
+                    settle_timeout = min(settle_timeout, 0.15)
                 if settle_timeout > 0:
                     with controller_tracer.interval("Wait for Settle"):
                         wait_for_settle(
@@ -2942,7 +2950,27 @@ class SessionManager:
         # Pre-snapshot for delivery verdict
         type_target_node = node if el_idx is not None else None
         before_snapshot_type = self._capture_element_snapshot(session, type_target_node)
-        cg_input.type_text(input_pid, text, source=session.event_source)
+        # Use confirmed delivery pipeline with mid-stream interruption
+        if feature_flags.confirmed_delivery and session.delivery_tap is not None:
+            from app._lib.input import deliver_type_text
+            _interrupt_monitor = self._user_interaction_monitor
+            _target_bid = session.target.bundle_id
+
+            def _check_interrupted() -> bool:
+                if not feature_flags.user_interruption_detection:
+                    return False
+                msg = _interrupt_monitor.check_interruption(_target_bid)
+                return msg is not None
+
+            deliver_type_text(
+                pid=input_pid,
+                text=text,
+                source=session.event_source,
+                confirmation_tap=session.delivery_tap,
+                check_interrupted=_check_interrupted,
+            )
+        else:
+            cg_input.type_text(input_pid, text, source=session.event_source)
         if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
             direct_verifier = None
             if el_idx is not None and node.ax_ref is not None:

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "mac-cua": {
+      "command": "/Users/affan/.local/bin/uv",
+      "args": ["run", "--directory", "/Users/affan/Documents/GitHub/mac-cua", "python", "main.py"]
+    }
+  }
+}

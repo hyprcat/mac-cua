@@ -187,8 +187,9 @@ class ActionOutcomeMonitor:
 
 
 class CGEventOutcomeMonitor:
-    def __init__(self, *, history_limit: int = 256) -> None:
+    def __init__(self, *, history_limit: int = 256, source_state_id: int | None = None) -> None:
         self._history_limit = history_limit
+        self._source_state_id = source_state_id
         self._lock = threading.Lock()
         self._events: deque[ObservedCGEvent] = deque(maxlen=history_limit)
         self._sequence = 0
@@ -250,6 +251,16 @@ class CGEventOutcomeMonitor:
         return expectation.matches(events)
 
     def _on_event(self, proxy: Any, event_type: int, event: Any) -> Any:
+        # Filter by source_state_id to distinguish automation from user input
+        if self._source_state_id is not None:
+            try:
+                from Quartz import CGEventGetIntegerValueField
+                _kCGEventSourceStateID = 45
+                event_source_id = CGEventGetIntegerValueField(event, _kCGEventSourceStateID)
+                if event_source_id != self._source_state_id:
+                    return event  # Not our event — skip
+            except Exception:
+                pass  # Can't filter — record anyway
         with self._lock:
             self._sequence += 1
             self._events.append(
@@ -265,7 +276,7 @@ class CGEventOutcomeMonitor:
 def expectation_for_click(button: str, count: int) -> CGEventSequenceExpectation:
     down = EVENT_RIGHT_MOUSE_DOWN if button == "right" else EVENT_LEFT_MOUSE_DOWN
     up = EVENT_RIGHT_MOUSE_UP if button == "right" else EVENT_LEFT_MOUSE_UP
-    event_types: list[int] = [EVENT_MOUSE_MOVED]
+    event_types: list[int] = []
     for _ in range(max(1, count)):
         event_types.extend([down, up])
     return CGEventSequenceExpectation(tuple(event_types), ordered=True)
@@ -273,7 +284,7 @@ def expectation_for_click(button: str, count: int) -> CGEventSequenceExpectation
 
 def expectation_for_drag() -> CGEventSequenceExpectation:
     return CGEventSequenceExpectation(
-        (EVENT_MOUSE_MOVED, EVENT_LEFT_MOUSE_DOWN, EVENT_LEFT_MOUSE_DRAGGED, EVENT_LEFT_MOUSE_UP),
+        (EVENT_LEFT_MOUSE_DOWN, EVENT_LEFT_MOUSE_DRAGGED, EVENT_LEFT_MOUSE_UP),
         ordered=True,
     )
 
@@ -287,4 +298,4 @@ def expectation_for_typing() -> CGEventSequenceExpectation:
 
 
 def expectation_for_scroll() -> CGEventSequenceExpectation:
-    return CGEventSequenceExpectation((EVENT_MOUSE_MOVED, EVENT_SCROLL_WHEEL), ordered=True)
+    return CGEventSequenceExpectation((EVENT_SCROLL_WHEEL,), ordered=True)

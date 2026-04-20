@@ -218,14 +218,9 @@ def _post_click(
     btn, down_type, up_type = _BUTTON_MAP[button]
     src = source if source is not None else _source
 
-    # Move cursor to target first — background apps need this to register
-    # the correct hit-test target before mouseDown arrives.
-    move = CGEventCreateMouseEvent(src, kCGEventMouseMoved, point, kCGMouseButtonLeft)
-    if move is None:
-        raise CGEventError("cg_event_creation_failed: mouseMove")
-    _decorate_mouse_event(move, window_id=window_id, pressure=0.0, event_number=_mouse_counter.next())
-    CGEventPostToPid(pid, move)
-    time.sleep(0.01)  # brief settle for hit-test registration
+    # No mouse-move pre-positioning — CGEventPostToPid kCGEventMouseMoved
+    # leaks to the visible cursor. The down/up events already carry the
+    # target point; window_id hints handle hit-test routing.
 
     for click_num in range(1, count + 1):
         if click_num > 1:
@@ -306,13 +301,7 @@ def drag(
     to_point = CGPointMake(sx2, sy2)
     src = source if source is not None else _source
 
-    move = CGEventCreateMouseEvent(src, kCGEventMouseMoved, from_point, kCGMouseButtonLeft)
-    if move is None:
-        raise CGEventError("cg_event_creation_failed: mouseDragged move")
-    _decorate_mouse_event(move, window_id=window_id, pressure=0.0)
-    CGEventPostToPid(pid, move)
-    time.sleep(0.01)
-
+    # No mouse-move pre-positioning — leaks to visible cursor.
     down = CGEventCreateMouseEvent(src, kCGEventLeftMouseDown, from_point, kCGMouseButtonLeft)
     if down is None:
         raise CGEventError("cg_event_creation_failed: mouseDragged down")
@@ -388,16 +377,7 @@ def scroll_pid(
 
     Works for native Cocoa apps but silently ignored by browsers/Electron.
     """
-    point = CGPointMake(x, y)
     src = source if source is not None else _source
-
-    # Move cursor within the app's event stream
-    move = CGEventCreateMouseEvent(src, kCGEventMouseMoved, point, kCGMouseButtonLeft)
-    if move is None:
-        raise CGEventError("CGEventCreateScrollWheelEvent returned NULL")
-    _decorate_mouse_event(move, window_id=window_id, pressure=0.0)
-    CGEventPostToPid(pid, move)
-    time.sleep(0.01)
 
     dy, dx = _scroll_deltas(direction)
     for i in range(clicks):
@@ -420,14 +400,7 @@ def scroll_pid_pixel(
     source: Any = None,
 ) -> None:
     """Scroll via pixel deltas for better cross-app background delivery."""
-    point = CGPointMake(x, y)
     src = source if source is not None else _source
-    move = CGEventCreateMouseEvent(src, kCGEventMouseMoved, point, kCGMouseButtonLeft)
-    if move is None:
-        raise CGEventError("CGEventCreateScrollWheelEvent returned NULL")
-    _decorate_mouse_event(move, window_id=window_id, pressure=0.0)
-    CGEventPostToPid(pid, move)
-    time.sleep(0.01)
 
     dy = dx = 0
     if direction == "up":
@@ -571,3 +544,53 @@ def deliver_key_events(
                     return DeliveryResult(transport_confirmed=True, fallback_used=True, micro_activated=True)
 
     return DeliveryResult(transport_confirmed=False, fallback_used=True, micro_activated=False)
+
+
+def deliver_type_text(
+    *,
+    pid: int,
+    text: str,
+    source: Any,
+    confirmation_tap: Any,
+    check_interrupted: Any = None,
+) -> DeliveryResult:
+    """Type text through the confirmed delivery pipeline, one character at a time.
+
+    Each character is posted via the source-filtered event source and confirmed
+    via the delivery tap. If check_interrupted is provided and returns True,
+    typing stops immediately (mid-stream interruption).
+    """
+    any_failed = False
+    for char in text:
+        if check_interrupted is not None and check_interrupted():
+            break
+
+        key_name = char
+        if char == " ":
+            key_name = "space"
+        elif char in {"\n", "\r"}:
+            key_name = "return"
+        elif char == "\t":
+            key_name = "tab"
+
+        try:
+            keycode, modifiers = parse_key_combo(key_name)
+        except ValueError:
+            # Unicode fallback — no confirmation available
+            _post_unicode_char(pid, char, source=source)
+            time.sleep(0.005)
+            continue
+
+        # Post with confirmation
+        confirmation_tap.reset()
+        _post_key_event(pid, keycode, True, modifiers, source=source)
+        confirmed = confirmation_tap.wait()
+        _post_key_event(pid, keycode, False, modifiers, source=source)
+        if not confirmed:
+            any_failed = True
+
+    return DeliveryResult(
+        transport_confirmed=not any_failed,
+        fallback_used=False,
+        micro_activated=False,
+    )
