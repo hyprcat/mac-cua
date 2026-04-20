@@ -196,6 +196,18 @@ def test_get_actions_normalizes_custom_toolbar_actions() -> None:
     assert actions == ["AXMovePrevious", "AXMoveNext", "AXRemoveFromToolbar"]
 
 
+def test_get_actions_keeps_show_menu_for_menu_driven_buttons() -> None:
+    element = object()
+
+    with patch(
+        "app._lib.accessibility.AXUIElementCopyActionNames",
+        return_value=(0, ["AXScrollToVisible", "AXShowMenu"]),
+    ):
+        actions = _get_actions(element, "AXButton")
+
+    assert actions == ["AXScrollToVisible", "AXShowMenu"]
+
+
 def test_walk_tree_uses_collection_and_section_subrole_names_and_state_order() -> None:
     root = object()
     collection = object()
@@ -242,3 +254,42 @@ def test_walk_tree_uses_collection_and_section_subrole_names_and_state_order() -
     assert nodes[2].label == "Top Picks for You"
     assert nodes[3].states == ["settable", "float"]
     assert nodes[3].value == "0"
+
+
+def test_walk_tree_falls_back_to_direct_children_for_provider_groups() -> None:
+    root = object()
+    collection = object()
+    tile = object()
+
+    attrs = {
+        root: {
+            "AXRole": "AXWindow",
+            "AXChildren": [collection],
+        },
+        collection: {
+            "AXRole": "AXOpaqueProviderGroup",
+            "AXChildren": None,
+        },
+        tile: {
+            "AXRole": "AXButton",
+            "AXDescription": "Black",
+            "AXChildren": [],
+        },
+    }
+
+    def fake_copy_attr(element, attr, _unused):
+        if element is collection and attr == "AXChildren":
+            return (0, [tile])
+        return (0, None)
+
+    with (
+        patch("app._lib.accessibility._read_attrs", side_effect=lambda element: attrs[element]),
+        patch("app._lib.accessibility._build_states", return_value=[]),
+        patch("app._lib.accessibility._get_actions", return_value=[]),
+        patch("app._lib.accessibility._get_element_pid", return_value=None),
+        patch("app._lib.accessibility.AXUIElementCopyAttributeValue", side_effect=fake_copy_attr),
+    ):
+        nodes = walk_tree(root)
+
+    assert [node.ax_role for node in nodes] == ["AXWindow", "AXOpaqueProviderGroup", "AXButton"]
+    assert nodes[2].description == "Black"

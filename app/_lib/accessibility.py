@@ -307,20 +307,24 @@ def _get_actions(element: Any, role: str) -> list[str]:
     err, actions = AXUIElementCopyActionNames(element, None)
     if err != kAXErrorSuccess or actions is None:
         return []
-    skip = {
-        "AXPress",
-        "AXCancel",
-        "AXConfirm",
-        "AXShowMenu",
-        "AXShowDefaultUI",
-        "AXShowAlternateUI",
-    }
-    raw_actions: list[str] = []
+    normalized_actions: list[str] = []
     for action in actions:
         normalized = _normalize_action_name(action)
-        if normalized is None or normalized in skip:
+        if normalized is None:
             continue
-        raw_actions.append(normalized)
+        normalized_actions.append(normalized)
+
+    has_primary_activation = any(
+        action in {"AXPress", "AXConfirm", "AXPick"}
+        for action in normalized_actions
+    )
+    raw_actions: list[str] = []
+    for action in normalized_actions:
+        if action in {"AXPress", "AXCancel", "AXConfirm", "AXPick", "AXShowDefaultUI", "AXShowAlternateUI"}:
+            continue
+        if action == "AXShowMenu" and has_primary_activation:
+            continue
+        raw_actions.append(action)
     if role in {"AXScrollArea", "AXCollection", "AXList", "AXOutline", "AXTable"}:
         return [
             action
@@ -328,6 +332,36 @@ def _get_actions(element: Any, role: str) -> list[str]:
             if action in {"AXScrollUpByPage", "AXScrollDownByPage"}
         ]
     return raw_actions
+
+
+_CHILDREN_FALLBACK_ROLES = frozenset({
+    "AXCollection",
+    "AXGroup",
+    "AXLayoutArea",
+    "AXList",
+    "AXOpaqueProviderGroup",
+    "AXOutline",
+    "AXScrollArea",
+    "AXSplitGroup",
+    "AXTable",
+    "AXToolbar",
+    "AXWindow",
+})
+
+
+def _children_for_walk(element: Any, attrs: dict[str, Any], role: str) -> list[Any] | None:
+    children = attrs.get(kAXChildrenAttribute)
+    if children:
+        return children
+    if role not in _CHILDREN_FALLBACK_ROLES:
+        return children
+    try:
+        err, direct_children = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute, None)
+    except Exception:
+        return children
+    if err != kAXErrorSuccess or direct_children is None:
+        return children
+    return direct_children
 
 
 def get_action_names_for_ref(element: Any) -> list[str]:
@@ -497,7 +531,7 @@ def walk_tree(
             url=link_url,
         ))
 
-        children = attrs.get(kAXChildrenAttribute)
+        children = _children_for_walk(element, attrs, role)
         if children:
             # Depth-first preorder traversal. Reverse push keeps AX child order
             # stable in the final flat list, which the pruning/indexing passes

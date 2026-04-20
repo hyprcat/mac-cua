@@ -1710,7 +1710,84 @@ class SessionManager:
         target_pid: int | None = None,
         app_type: AppType | None = None,
     ) -> list[Node]:
-        return accessibility.walk_tree(ax_window, target_pid=target_pid)
+        nodes = accessibility.walk_tree(ax_window, target_pid=target_pid)
+        return self._expand_focused_collection_children(nodes)
+
+    def _node_has_descendants(self, nodes: list[Node], index: int) -> bool:
+        if not (0 <= index < len(nodes)):
+            return False
+        depth = nodes[index].depth
+        for next_index in range(index + 1, len(nodes)):
+            next_node = nodes[next_index]
+            if next_node.depth <= depth:
+                return False
+            return True
+        return False
+
+    def _node_has_meaningful_direct_children(self, nodes: list[Node], index: int) -> bool:
+        if not (0 <= index < len(nodes)):
+            return False
+        depth = nodes[index].depth
+        direct_children: list[Node] = []
+        for next_index in range(index + 1, len(nodes)):
+            next_node = nodes[next_index]
+            if next_node.depth <= depth:
+                break
+            if next_node.depth == depth + 1:
+                direct_children.append(next_node)
+        if not direct_children:
+            return False
+        return any(child.ax_role != "AXScrollBar" for child in direct_children)
+
+    def _live_collection_children(self, node: Node) -> list[Node]:
+        if node.ax_ref is None:
+            return []
+        try:
+            from ApplicationServices import AXUIElementCopyAttributeValue, kAXErrorSuccess
+        except Exception:
+            return []
+
+        child_refs: list[Any] = []
+        for attr in ("AXChildren", "AXChildrenInNavigationOrder", "AXVisibleChildren"):
+            try:
+                err, refs = AXUIElementCopyAttributeValue(node.ax_ref, attr, None)
+            except Exception:
+                continue
+            if err != kAXErrorSuccess or refs is None:
+                continue
+            child_refs = list(refs)
+            if child_refs:
+                break
+        children: list[Node] = []
+        for child_ref in child_refs[:100]:
+            try:
+                child = accessibility.node_from_ref(child_ref, depth=node.depth + 1, index=-1)
+            except Exception:
+                continue
+            children.append(child)
+        return children
+
+    def _expand_focused_collection_children(self, nodes: list[Node]) -> list[Node]:
+        if not nodes:
+            return nodes
+
+        expanded: list[Node] = []
+        for index, node in enumerate(nodes):
+            expanded.append(node)
+            if "focused" not in node.states:
+                continue
+            if node.role not in {"collection", "list"} and node.ax_role not in {"AXCollection", "AXList", "AXOpaqueProviderGroup"}:
+                continue
+            if self._node_has_meaningful_direct_children(nodes, index):
+                continue
+            children = self._live_collection_children(node)
+            if not children:
+                continue
+            expanded.extend(children)
+
+        for new_index, node in enumerate(expanded):
+            node.index = new_index
+        return expanded
 
     def _walk_interaction_tree(
         self,

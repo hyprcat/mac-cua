@@ -1118,6 +1118,138 @@ class SessionManagerTests(unittest.TestCase):
             assert verifier is not None
             self.assertTrue(verifier())
 
+    def test_expand_focused_collection_children_inserts_live_children(self) -> None:
+        manager = SessionManager()
+        root = Node(
+            index=0,
+            role="standard window",
+            label="Wallpaper",
+            states=[],
+            description=None,
+            value=None,
+            ax_id=None,
+            secondary_actions=[],
+            depth=0,
+            ax_role="AXWindow",
+            ax_ref=object(),
+        )
+        collection = Node(
+            index=1,
+            role="collection",
+            label=None,
+            states=["focused"],
+            description=None,
+            value=None,
+            ax_id=None,
+            secondary_actions=[],
+            depth=1,
+            ax_role="AXOpaqueProviderGroup",
+            ax_ref=object(),
+        )
+        child = Node(
+            index=-1,
+            role="button",
+            label=None,
+            states=[],
+            description="Black",
+            value=None,
+            ax_id="Black;",
+            secondary_actions=["AXShowMenu"],
+            depth=2,
+            ax_role="AXButton",
+            ax_ref=object(),
+        )
+
+        with patch.object(manager, "_live_collection_children", return_value=[child]):
+            expanded = manager._expand_focused_collection_children([root, collection])
+
+        self.assertEqual([node.description for node in expanded], [None, None, "Black"])
+        self.assertEqual(expanded[2].depth, 2)
+        self.assertEqual(expanded[2].index, 2)
+
+    def test_expand_focused_collection_children_skips_when_descendants_already_present(self) -> None:
+        manager = SessionManager()
+        collection = Node(
+            index=0,
+            role="collection",
+            label=None,
+            states=["focused"],
+            description=None,
+            value=None,
+            ax_id=None,
+            secondary_actions=[],
+            depth=0,
+            ax_role="AXOpaqueProviderGroup",
+            ax_ref=object(),
+        )
+        child = Node(
+            index=1,
+            role="button",
+            label=None,
+            states=[],
+            description="Black",
+            value=None,
+            ax_id="Black;",
+            secondary_actions=["AXShowMenu"],
+            depth=1,
+            ax_role="AXButton",
+            ax_ref=object(),
+        )
+
+        with patch.object(manager, "_live_collection_children") as live_children:
+            expanded = manager._expand_focused_collection_children([collection, child])
+
+        self.assertEqual(expanded, [collection, child])
+        live_children.assert_not_called()
+
+    def test_expand_focused_collection_children_ignores_scrollbar_only_children(self) -> None:
+        manager = SessionManager()
+        collection = Node(
+            index=0,
+            role="collection",
+            label=None,
+            states=["focused"],
+            description=None,
+            value=None,
+            ax_id=None,
+            secondary_actions=[],
+            depth=0,
+            ax_role="AXOpaqueProviderGroup",
+            ax_ref=object(),
+        )
+        scrollbar = Node(
+            index=1,
+            role="scroll bar",
+            label="0",
+            states=["settable", "float"],
+            description=None,
+            value="0",
+            ax_id=None,
+            secondary_actions=[],
+            depth=1,
+            ax_role="AXScrollBar",
+            ax_ref=object(),
+        )
+        child = Node(
+            index=-1,
+            role="button",
+            label=None,
+            states=[],
+            description="Black",
+            value=None,
+            ax_id="Black;",
+            secondary_actions=["AXShowMenu"],
+            depth=1,
+            ax_role="AXButton",
+            ax_ref=object(),
+        )
+
+        with patch.object(manager, "_live_collection_children", return_value=[child]):
+            expanded = manager._expand_focused_collection_children([collection, scrollbar])
+
+        self.assertEqual([node.description for node in expanded], [None, "Black", None])
+        self.assertEqual(expanded[1].depth, 1)
+
     def test_verify_cgevent_contract_without_transport_monitor_uses_direct_verifier(self) -> None:
         manager = SessionManager()
         session = AppSession(
