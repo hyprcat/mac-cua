@@ -2542,6 +2542,23 @@ class SessionManager:
 
             return img
 
+        # Validate window ownership before capture
+        from app._lib.screenshot import validate_and_capture as _validate_wid
+        validation = _validate_wid(target.window_id, target.pid)
+        if validation is not None:
+            _, validated_wid = validation
+            if validated_wid != target.window_id:
+                logger.info("Window ID re-resolved: %d -> %d", target.window_id, validated_wid)
+                target = AppTarget(
+                    pid=target.pid,
+                    bundle_id=target.bundle_id,
+                    window_id=validated_wid,
+                    window_pid=target.window_pid,
+                    ax_app=target.ax_app,
+                    ax_window=target.ax_window,
+                )
+                session.target = target
+
         # Use retry policy for screenshot capture
         img = None
         try:
