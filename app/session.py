@@ -441,7 +441,7 @@ class SessionManager:
             )
 
         # Set up per-session event source and delivery confirmation tap
-        if session.event_source is None:
+        if feature_flags.confirmed_delivery and session.event_source is None:
             from app._lib.input import create_event_source
             from app._lib.delivery_tap import DeliveryConfirmationTap
             session.event_source = create_event_source()
@@ -3141,8 +3141,8 @@ class SessionManager:
         if resolved_key is None:
             resolved_key = key
 
-        # Use confirmed delivery pipeline when tap is available
-        if session.delivery_tap is not None and session.input_strategy is not None:
+        # Use confirmed delivery pipeline when tap is available and flag enabled
+        if feature_flags.confirmed_delivery and session.delivery_tap is not None and session.input_strategy is not None:
             from app._lib.input import deliver_key_events
             from app._lib.keys import parse_key_combo
             try:

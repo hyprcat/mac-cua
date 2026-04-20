@@ -43,6 +43,7 @@ class FeatureFlags:
     personal_instructions_overrides_builtin: bool = False
     advanced_pruning: bool = True
     allow_forbidden_targets: bool = False
+    confirmed_delivery: bool = True  # Confirmed delivery pipeline (discrete modifiers, SkyLight fallback)
 
     @classmethod
     def load(cls, config_path: str = _DEFAULT_CONFIG_PATH) -> FeatureFlags:
