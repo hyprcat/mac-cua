@@ -176,6 +176,10 @@ class TestFeatureFlagLoading(unittest.TestCase):
         self.assertFalse(flags.always_simulate_click)
         self.assertFalse(flags.screenshot_classifier)
         self.assertFalse(flags.allow_forbidden_targets)
+        self.assertTrue(flags.transient_graphs)
+        self.assertTrue(flags.ax_action_verification)
+        self.assertTrue(flags.cgevent_action_verification)
+        self.assertFalse(flags.transient_graph_debug)
 
 
 if __name__ == "__main__":

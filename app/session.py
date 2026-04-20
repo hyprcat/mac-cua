@@ -18,6 +18,7 @@ from app._lib.errors import (
     ScreenshotError,
     StaleReferenceError,
     StepLimitError,
+    UserInterruptionError,
 )
 from app._lib import apps, accessibility, screenshot, input as cg_input
 from app._lib.tree import serialize, make_header
@@ -28,6 +29,29 @@ from app._lib.analytics import analytics
 from app._lib.elicitation import AppApprovalStore
 from app._lib.lifecycle import SessionLifecycle
 from app._lib.refetchable_tree import RefetchableTree, RefetchErrorCode
+from app._lib.graphs import (
+    GraphKind,
+    GraphRecord,
+    GraphRegistry,
+    GraphState,
+    SessionGraphs,
+    TransientGraphTracker,
+    TransientSurface,
+    TransientSource,
+    annotate_graph_nodes,
+    match_node_by_locator,
+)
+from app._lib.action_verification import (
+    ActionOutcomeMonitor,
+    ActionVerificationResult,
+    CGEventOutcomeMonitor,
+    VerificationContract,
+    expectation_for_click,
+    expectation_for_drag,
+    expectation_for_keypress,
+    expectation_for_scroll,
+    expectation_for_typing,
+)
 from app._lib.screen_capture import (
     get_screen_capture_worker,
     get_screenshot_classifier,
@@ -37,8 +61,13 @@ from app._lib.retry import RetryPolicy, with_retry, SCREENSHOT_RETRY_POLICY
 from app._lib.screenshot import ApplicationWindow
 from app._lib.observer import (
     AXNotificationObserver,
+    AX_NOTIFICATION_CREATED,
+    AX_NOTIFICATION_ELEMENT_DESTROYED,
+    AX_NOTIFICATION_FOCUSED_ELEMENT_CHANGED,
     AX_NOTIFICATION_MENU_OPENED,
     AX_NOTIFICATION_MENU_CLOSED,
+    AX_NOTIFICATION_VALUE_CHANGED,
+    AX_NOTIFICATION_WINDOW_CREATED,
     NotificationBridge,
     TreeInvalidationMonitor,
     TREE_INVALIDATION_NOTIFICATIONS,
@@ -83,11 +112,9 @@ logger = logging.getLogger(__name__)
 WINDOW_RETRY_DELAY_S = 0.15
 SCREENSHOT_RETRY_DELAY_S = 0.1
 SCROLL_CLICKS_PER_PAGE = 6
-
-# Maximum serialized tree size in bytes. If the tree_text exceeds this after
-# pruning, the oldest lines are dropped until it fits. Prevents oversized
-# responses from web-heavy apps (e.g. Safari on claude.ai).
-TREE_BYTE_BUDGET = 30_000
+SCROLL_PIXELS_PER_PAGE_RATIO = 0.6
+SCROLL_PIXELS_MIN = 160
+GEOMETRY_HINT_LIMIT = 160
 
 GUIDANCE_DIR = Path(__file__).parent / "guidance"
 
@@ -125,6 +152,59 @@ _POINTER_PREFERRED_ROLES = frozenset({
     "text area",
     "text field",
 })
+_SCROLLABLE_DISPLAY_ROLES = frozenset({
+    "list",
+    "outline",
+    "scroll area",
+    "table",
+    "web area",
+})
+_DIRECTIONAL_SCROLL_ACTIONS = frozenset({
+    "AXScrollUpByPage",
+    "AXScrollDownByPage",
+    "AXScrollLeftByPage",
+    "AXScrollRightByPage",
+})
+_AX_ACTIVATION_ACTIONS = frozenset({
+    "AXConfirm",
+    "AXPick",
+    "AXPress",
+})
+_STRICT_SECONDARY_ACTIONS = frozenset({
+    "AXScrollToVisible",
+    "AXShowAlternateUI",
+    "AXShowDefaultUI",
+    "AXShowMenu",
+})
+_BUTTONISH_AX_ROLES = frozenset({
+    "AXButton",
+    "AXCheckBox",
+    "AXMenuButton",
+    "AXPopUpButton",
+    "AXRadioButton",
+    "AXTab",
+})
+_SELECTION_CONTAINER_ROLES = frozenset({
+    "collection",
+    "list",
+    "outline",
+    "table",
+})
+
+
+def _safe_perform_action(node: Node, action: str) -> bool:
+    try:
+        accessibility.perform_action(node, action)
+        return True
+    except Exception:
+        return False
+_GEOMETRY_HINT_ROLES = _POINTER_PREFERRED_ROLES | _SCROLLABLE_DISPLAY_ROLES
+_TEXT_GROUNDING_ROLES = frozenset({
+    "text",
+    "heading",
+    "image",
+    "menu item",
+})
 
 
 @dataclass
@@ -142,6 +222,7 @@ class AppSession:
     target: AppTarget
     snapshot_id: int = 0
     tree_nodes: list[Node] = field(default_factory=list)
+    graphs: SessionGraphs = field(default_factory=SessionGraphs, repr=False)
     guidance: str | None = None
     screenshot_size: tuple[int, int] | None = None
     # Observer infrastructure — created per-session for tree invalidation
@@ -156,6 +237,9 @@ class AppSession:
     focus_enforcer: SyntheticAppFocusEnforcer | None = field(default=None, repr=False)
     input_strategy: InputStrategy | None = field(default=None, repr=False)
     menu_tracker: MenuTracker | None = field(default=None, repr=False)
+    transient_graph_tracker: TransientGraphTracker | None = field(default=None, repr=False)
+    ax_outcome_monitor: ActionOutcomeMonitor | None = field(default=None, repr=False)
+    cgevent_outcome_monitor: CGEventOutcomeMonitor | None = field(default=None, repr=False)
     app_type: AppType = field(default=AppType.NATIVE_COCOA, repr=False)
     cursor: BackgroundCursor | None = field(default=None, repr=False)
     # Selection tracking
@@ -165,6 +249,10 @@ class AppSession:
     # Scroll: cached working method per session (None = not yet determined)
     # Values: "ax", "pid", "system", None
     scroll_method: str | None = field(default=None, repr=False)
+    last_action_verification: ActionVerificationResult | None = field(default=None, repr=False)
+    pending_transient_source: TransientSource | None = field(default=None, repr=False)
+    user_state_invalidated: bool = False
+    user_state_invalidated_message: str | None = None
 
 
 class SessionManager:
@@ -184,6 +272,7 @@ class SessionManager:
         )
         self._approval_store = AppApprovalStore()
         self._lifecycle = SessionLifecycle(step_limit=workaround_flags.loop_step_limit)
+        self._graph_registry = GraphRegistry()
 
     def _ensure_trackers_started(self) -> None:
         """Start global trackers on first use (lazy init)."""
@@ -265,11 +354,49 @@ class SessionManager:
             observer.add_notification(session.target.ax_window, AX_NOTIFICATION_MENU_OPENED)
             observer.add_notification(session.target.ax_window, AX_NOTIFICATION_MENU_CLOSED)
 
-        if observer.start():
+        transient_tracker = None
+        if feature_flags.transient_graphs:
+            transient_tracker = TransientGraphTracker()
+            for notification in (
+                AX_NOTIFICATION_MENU_OPENED,
+                AX_NOTIFICATION_MENU_CLOSED,
+                AX_NOTIFICATION_CREATED,
+                AX_NOTIFICATION_WINDOW_CREATED,
+                AX_NOTIFICATION_ELEMENT_DESTROYED,
+                AX_NOTIFICATION_FOCUSED_ELEMENT_CHANGED,
+                AX_NOTIFICATION_VALUE_CHANGED,
+            ):
+                bridge.subscribe_detailed(notification, transient_tracker.on_notification)
+
+            app_level_targets = [session.target.ax_window]
+            if session.target.ax_app is not None:
+                app_level_targets.append(session.target.ax_app)
+            for target in app_level_targets:
+                if target is None:
+                    continue
+                for notification in (
+                    AX_NOTIFICATION_MENU_OPENED,
+                    AX_NOTIFICATION_MENU_CLOSED,
+                    AX_NOTIFICATION_CREATED,
+                    AX_NOTIFICATION_WINDOW_CREATED,
+                    AX_NOTIFICATION_ELEMENT_DESTROYED,
+                    AX_NOTIFICATION_FOCUSED_ELEMENT_CHANGED,
+                    AX_NOTIFICATION_VALUE_CHANGED,
+                ):
+                    observer.add_notification(target, notification)
+
+        observer_started = observer.start()
+        if observer_started:
             session.observer = observer
             session.notification_bridge = bridge
             session.invalidation_monitor = invalidation_monitor
             session.menu_tracker = menu_tracker
+            session.transient_graph_tracker = transient_tracker
+            session.ax_outcome_monitor = ActionOutcomeMonitor(
+                bridge,
+                invalidation_monitor,
+                transient_tracker,
+            )
             logger.debug(
                 "AXObserver started for %s (pid %d) with %d notifications",
                 session.target.bundle_id,
@@ -282,6 +409,10 @@ class SessionManager:
                 session.target.bundle_id,
             )
             observer.stop()
+        if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is None:
+            cgevent_monitor = CGEventOutcomeMonitor()
+            cgevent_monitor.start()
+            session.cgevent_outcome_monitor = cgevent_monitor
 
         # Set up selection tracking client
         if feature_flags.system_selection and session.selection_client is None:
@@ -325,14 +456,21 @@ class SessionManager:
         if session.menu_tracker is not None:
             session.menu_tracker.reset()
             session.menu_tracker = None
+        if session.transient_graph_tracker is not None:
+            session.transient_graph_tracker.reset()
+            session.transient_graph_tracker = None
+        session.ax_outcome_monitor = None
+        if session.cgevent_outcome_monitor is not None:
+            session.cgevent_outcome_monitor.stop()
+            session.cgevent_outcome_monitor = None
 
     def _activate_focus_enforcement(self, session: AppSession) -> None:
-        """Step 6: Temporarily activate target app for reliable input delivery.
+        """Step 6: Monitor focus without activating the target app.
 
         Creates a SyntheticAppFocusEnforcer that:
-        1. Records current frontmost app
-        2. Activates target app
-        3. Monitors for focus theft and re-activates
+        1. Monitors frontmost app changes during the action
+        2. Installs listen-only taps for focus-theft diagnostics
+        3. Never proactively activates or raises the target app
         """
         if session.focus_enforcer is not None and session.focus_enforcer.is_active:
             return  # Already enforcing
@@ -354,7 +492,32 @@ class SessionManager:
             session.focus_enforcer.deactivate()
             session.focus_enforcer = None
 
-    def _cleanup_after_action(self, session: AppSession | None) -> None:
+    def _restore_previous_frontmost_app(
+        self,
+        session: AppSession | None,
+        previous_frontmost: Any | None,
+    ) -> None:
+        if session is None or previous_frontmost is None:
+            return
+        try:
+            previous_pid = int(previous_frontmost.processIdentifier())
+        except Exception:
+            previous_pid = None
+        if previous_pid is None or previous_pid == session.target.pid:
+            return
+        current = apps.get_frontmost_app()
+        try:
+            current_pid = int(current.processIdentifier()) if current is not None else None
+        except Exception:
+            current_pid = None
+        if current_pid == session.target.pid:
+            apps.restore_frontmost(previous_frontmost)
+
+    def _cleanup_after_action(
+        self,
+        session: AppSession | None,
+        previous_frontmost: Any | None = None,
+    ) -> None:
         """Clean up focus/input resources after action (success or error)."""
         if session is None:
             return
@@ -362,6 +525,7 @@ class SessionManager:
             self._deactivate_focus_enforcement(session)
         if feature_flags.user_interruption_detection:
             self._user_interaction_monitor.stop_monitoring()
+        self._restore_previous_frontmost_app(session, previous_frontmost)
 
     def _track_session(self, session: AppSession, previous_window_id: int | None = None) -> None:
         if previous_window_id is not None and previous_window_id != session.target.window_id:
@@ -377,6 +541,34 @@ class SessionManager:
         # Set up observer for tree invalidation
         self._setup_observer(session)
 
+    def _ensure_session_observer_ready(self, session: AppSession) -> None:
+        if session.target.ax_window is None:
+            return
+        if (
+            session.observer is None
+            or session.invalidation_monitor is None
+            or session.ax_outcome_monitor is None
+        ):
+            self._teardown_observer(session)
+            self._setup_observer(session)
+        if session.invalidation_monitor is None:
+            return
+        if session.refetchable_tree is not None:
+            session.refetchable_tree.update(
+                session.refetchable_tree.nodes,
+                monitor=session.invalidation_monitor,
+            )
+        graphs: list[GraphRecord] = []
+        if session.graphs.persistent_graph is not None:
+            graphs.append(session.graphs.persistent_graph)
+        graphs.extend(session.graphs.transient_stack)
+        for graph in graphs:
+            if graph.refetchable_tree is not None:
+                graph.refetchable_tree.update(
+                    graph.refetchable_tree.nodes,
+                    monitor=session.invalidation_monitor,
+                )
+
     def execute(self, tool: str, params: dict) -> ToolResponse:
         """Execute a tool call following the action pipeline.
 
@@ -386,7 +578,7 @@ class SessionManager:
         3. Check URL blocklist
         4. Ensure permissions
         5. Resolve element
-        6. Enforce focus
+        6. Monitor focus without activating the target app
         7. Execute action
         8. Wait for settle (event-driven)
         9. Check user interruption
@@ -402,11 +594,14 @@ class SessionManager:
 
         session = None
         interruption_msg = None
+        previous_frontmost = None
         with controller_tracer.interval(f"Action:{tool}") as span:
             try:
                 with controller_tracer.interval("Resolve Session"):
                     self._ensure_trackers_started()
                     session = self._resolve_session(tool, params)
+                if tool not in ("get_app_state", "list_apps"):
+                    previous_frontmost = apps.get_frontmost_app()
                 # Step 1b: Analytics
                 analytics.mcp_tool_called(tool)
                 # Step 2: Check safety blocklist
@@ -427,15 +622,6 @@ class SessionManager:
                     and tool not in ("get_app_state", "list_apps")
                 ):
                     self._activate_focus_enforcement(session)
-                # Step 6b: Wait for menus to close before acting
-                if (
-                    feature_flags.menu_tracking
-                    and session.menu_tracker is not None
-                    and session.menu_tracker.menus_open
-                    and tool not in ("get_app_state", "list_apps")
-                ):
-                    logger.debug("Waiting for menus to close before %s", tool)
-                    session.menu_tracker.wait_for_menu_close(timeout=3.0)
                 # Step 6c: Start user interaction monitoring
                 if (
                     feature_flags.user_interruption_detection
@@ -445,8 +631,49 @@ class SessionManager:
                 # Steps 5-7: Element resolution + execute action
                 with controller_tracer.interval(f"Execute:{tool}"):
                     result = self._dispatch(tool, session, params)
+                transient_probe_active = (
+                    feature_flags.transient_graphs
+                    and tool not in ("get_app_state", "list_apps")
+                    and session.transient_graph_tracker is not None
+                    and session.transient_graph_tracker.has_active_transient
+                )
+                if transient_probe_active:
+                    with controller_tracer.interval("Capture Transient Snapshot"):
+                        response = self.take_snapshot(session, skip_refresh=True)
+                    if feature_flags.user_interruption_detection:
+                        interruption_msg = self._user_interaction_monitor.check_interruption(
+                            session.target.bundle_id,
+                        )
+                        if interruption_msg is not None:
+                            logger.info("userInterruptedControlledApp: %s", interruption_msg)
+                            self._invalidate_session_for_user_change(session, interruption_msg)
+                            self._user_interaction_monitor.stop_monitoring()
+                            raise UserInterruptionError(interruption_msg)
+                        self._user_interaction_monitor.stop_monitoring()
+                    response.result = result
+                    analytics.service_result(tool, success=True, duration_ms=0.0)
+                    if feature_flags.focus_enforcement:
+                        self._deactivate_focus_enforcement(session)
+                    self._restore_previous_frontmost_app(session, previous_frontmost)
+                    return response
                 # Step 8: Wait for settle (event-driven via TreeInvalidationMonitor)
                 settle_timeout = SETTLE_TIMEOUTS.get(tool, 1.0)
+                transient_open = (
+                    feature_flags.transient_graphs
+                    and session.transient_graph_tracker is not None
+                    and session.transient_graph_tracker.has_active_transient
+                )
+                if (
+                    (
+                        (feature_flags.menu_tracking and session.menu_tracker is not None and session.menu_tracker.menus_open)
+                        or transient_open
+                    )
+                    and tool not in ("get_app_state", "list_apps")
+                ):
+                    # Leave background menus responsive for the next tool call
+                    # instead of idling long enough for user activity to dismiss them.
+                    logger.debug("Skipping settle wait for %s while menu is open", tool)
+                    settle_timeout = 0.0
                 if settle_timeout > 0:
                     with controller_tracer.interval("Wait for Settle"):
                         wait_for_settle(
@@ -462,6 +689,9 @@ class SessionManager:
                     )
                     if interruption_msg is not None:
                         logger.info("userInterruptedControlledApp: %s", interruption_msg)
+                        self._invalidate_session_for_user_change(session, interruption_msg)
+                        self._user_interaction_monitor.stop_monitoring()
+                        raise UserInterruptionError(interruption_msg)
                     self._user_interaction_monitor.stop_monitoring()
                 # Step 10: Capture snapshot
                 with controller_tracer.interval("Capture Snapshot"):
@@ -470,10 +700,8 @@ class SessionManager:
                     response = self.take_snapshot(session, skip_refresh=True)
                 response.result = result
                 analytics.service_result(tool, success=True, duration_ms=0.0)
-                # Attach interruption warning to response if detected
-                if feature_flags.user_interruption_detection and interruption_msg is not None:
-                    response.result = f"{result}\n\n⚠️ {interruption_msg}" if result else interruption_msg
                 if tool == "get_app_state":
+                    self._clear_user_invalidated_state(session)
                     if not session.guidance_delivered:
                         guidance = self._load_guidance(session.target.bundle_id)
                         # Detect AX-poor apps and inject coordinate-mode guidance
@@ -493,17 +721,28 @@ class SessionManager:
                 # Step 11: Deactivate focus enforcement
                 if feature_flags.focus_enforcement:
                     self._deactivate_focus_enforcement(session)
+                self._restore_previous_frontmost_app(session, previous_frontmost)
                 # Step 12: Return response
                 return response
             except StaleReferenceError as e:
-                self._cleanup_after_action(session)
+                self._cleanup_after_action(session, previous_frontmost)
                 if session:
                     response = self.take_snapshot(session)
                     response.error = f"Element reference became stale: {e}. Tree refreshed."
                     return response
                 return self._error_only(str(e))
+            except UserInterruptionError as e:
+                self._cleanup_after_action(session, previous_frontmost)
+                if session is not None:
+                    return ToolResponse(
+                        app=session.target.bundle_id,
+                        pid=session.target.pid,
+                        snapshot_id=session.snapshot_id,
+                        error=str(e),
+                    )
+                return self._error_only(str(e))
             except AutomationError as e:
-                self._cleanup_after_action(session)
+                self._cleanup_after_action(session, previous_frontmost)
                 if session:
                     return self._try_snapshot_or_error(session, e)
                 return self._error_only(str(e))
@@ -511,15 +750,24 @@ class SessionManager:
     def _resolve_session(self, tool: str, params: dict) -> AppSession:
         window_id = params.get("window_id")
         if window_id is not None:
-            return self.get_or_create_session_for_window(int(window_id))
+            session = self.get_or_create_session_for_window(int(window_id))
+        else:
+            app = params.get("app")
+            if app is None:
+                raise AutomationError(
+                    f"{tool} requires window_id or app. Prefer window_id from the latest get_app_state."
+                )
+            session = self.get_or_create_session(app)
 
-        app = params.get("app")
-        if app is None:
-            raise AutomationError(
-                f"{tool} requires window_id or app. Prefer window_id from the latest get_app_state."
+        if tool != "get_app_state" and getattr(session, "user_state_invalidated", False):
+            raise UserInterruptionError(
+                getattr(session, "user_state_invalidated_message", None)
+                or "The user changed the target app. Re-query the latest state with `get_app_state` before sending more actions."
             )
 
-        return self.get_or_create_session(app)
+        self._ensure_session_observer_ready(session)
+
+        return session
 
     def _app_hint_matches_bundle(self, app_hint: str, bundle_id: str) -> bool:
         hint = app_hint.strip().casefold()
@@ -789,21 +1037,404 @@ class SessionManager:
         button: str = "left",
         count: int = 1,
     ) -> bool:
-        sx, sy = accessibility.get_element_position(node)
-        if sx is None or sy is None:
+        target_node = self._prepare_node_for_pointer_click(session, node)
+        target_node = self._resolve_click_target_node(session, target_node)
+        point = self._click_point_for_node(session, target_node)
+        if point is None:
             return False
+        sx, sy = point
         try:
+            transport_mark = 0
+            if session.cgevent_outcome_monitor is not None:
+                _, transport_mark = session.cgevent_outcome_monitor.begin_action()
+            notification_mark = (
+                session.ax_outcome_monitor.mark()
+                if session.ax_outcome_monitor is not None
+                else None
+            )
             cg_input.click_at_screen_point(
-                session.target.window_pid,
+                self._background_pid_for_node(session, target_node),
                 sx,
                 sy,
                 button=button,
                 count=count,
+                window_id=session.target.window_id,
             )
+            if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
+                transient_source = None
+                direct_verifier = self._make_selection_click_verifier(session, target_node)
+                if button == "right":
+                    transient_source = self._make_transient_source(
+                        session,
+                        node,
+                        action_name="CGEventClick",
+                        reopen_fn=lambda resolved: self._background_click_node(
+                            session, resolved, button=button, count=count
+                        ),
+                        graph_kind=self._active_graph(session).kind if self._active_graph(session) is not None else GraphKind.PERSISTENT,
+                    )
+                verification = self._verify_cgevent_contract(
+                    session,
+                    expectation=expectation_for_click(button, count),
+                    transport_mark=transport_mark,
+                    contract=VerificationContract(
+                        expect_transient_open=(button == "right"),
+                        direct_verifier=direct_verifier,
+                    ),
+                    notification_mark=notification_mark,
+                    transient_source=transient_source,
+                )
+                return verification in {
+                    ActionVerificationResult.CONFIRMED,
+                    ActionVerificationResult.TRANSIENT_OPENED,
+                }
             return True
         except InputError as exc:
             logger.debug("Background click fallback failed: %s", exc)
             return False
+
+    def _iter_node_ancestors(self, session: AppSession, node: Node):
+        if not session.tree_nodes or node.index is None:
+            return
+        ancestor_depth = node.depth
+        for prev_idx in range(node.index - 1, -1, -1):
+            prev = session.tree_nodes[prev_idx]
+            if prev.depth >= ancestor_depth:
+                continue
+            yield prev
+            ancestor_depth = prev.depth
+
+    def _background_pid_for_node(self, session: AppSession, node: Node | None) -> int:
+        if node is not None and node.is_oop and node.element_pid is not None:
+            return node.element_pid
+        return session.target.window_pid
+
+    def _iter_live_click_ancestors(self, node: Node):
+        current = node.ax_ref
+        depth = node.depth
+        for _ in range(12):
+            if current is None:
+                break
+            parent = accessibility.get_parent_ref(current)
+            if parent is None:
+                break
+            depth = max(0, depth - 1)
+            current = parent
+            yield accessibility.node_from_ref(parent, depth=depth)
+
+    def _node_has_current_snapshot_index(self, session: AppSession, node: Node) -> bool:
+        return (
+            node.index is not None
+            and 0 <= node.index < len(session.tree_nodes)
+            and session.tree_nodes[node.index] is node
+        )
+
+    def _resolve_click_target_node(self, session: AppSession, node: Node) -> Node:
+        candidates = [node]
+        candidates.extend(self._iter_live_click_ancestors(node))
+        if self._node_has_current_snapshot_index(session, node):
+            candidates.extend(self._iter_node_ancestors(session, node) or [])
+        for candidate in candidates:
+            if accessibility.get_element_frame(candidate) is not None:
+                return candidate
+        return node
+
+    def _window_visible_rect(self, session: AppSession) -> tuple[float, float, float, float] | None:
+        return screenshot.get_window_bounds(session.target.window_id)
+
+    def _visible_click_point_for_frame(
+        self,
+        session: AppSession,
+        frame: tuple[float, float, float, float],
+    ) -> tuple[float, float] | None:
+        fx, fy, fw, fh = frame
+        if fw <= 0 or fh <= 0:
+            return None
+        visible = self._window_visible_rect(session)
+        if visible is None:
+            return (fx + fw / 2, fy + fh / 2)
+        vx, vy, vw, vh = visible
+        if vw <= 0 or vh <= 0:
+            return None
+        ix = max(fx, vx)
+        iy = max(fy, vy)
+        iw = min(fx + fw, vx + vw) - ix
+        ih = min(fy + fh, vy + vh) - iy
+        if iw <= 0 or ih <= 0:
+            return None
+        return (ix + iw / 2, iy + ih / 2)
+
+    def _click_point_for_node(
+        self,
+        session: AppSession,
+        node: Node,
+    ) -> tuple[float, float] | None:
+        frame = accessibility.get_element_frame(node)
+        if frame is None:
+            return None
+        return self._visible_click_point_for_frame(session, frame)
+
+    def _node_is_visible_in_window(self, session: AppSession, node: Node) -> bool:
+        frame = accessibility.get_element_frame(node)
+        if frame is None:
+            return False
+        return self._visible_click_point_for_frame(session, frame) is not None
+
+    def _refresh_live_node_from_ref(self, node: Node) -> Node:
+        if node.ax_ref is None:
+            return node
+        try:
+            return accessibility.node_from_ref(node.ax_ref, depth=node.depth)
+        except Exception:
+            logger.debug("Failed to refresh live node %s from AX ref", node.index, exc_info=True)
+            return node
+
+    def _prepare_node_for_pointer_click(self, session: AppSession, node: Node) -> Node:
+        if self._node_is_visible_in_window(session, node):
+            return node
+        if "AXScrollToVisible" not in self._node_action_names(node):
+            return node
+        try:
+            mark = session.ax_outcome_monitor.mark() if session.ax_outcome_monitor is not None else None
+            accessibility.perform_action(node, "AXScrollToVisible")
+            verification = self._verify_ax_contract(
+                session,
+                contract=VerificationContract(
+                    allow_focus_change=False,
+                    allow_value_change=False,
+                    direct_verifier=lambda: self._node_is_visible_in_window(
+                        session,
+                        self._refresh_live_node_from_ref(node),
+                    ),
+                ),
+                mark=mark,
+            )
+            if verification in {
+                ActionVerificationResult.CONFIRMED,
+                ActionVerificationResult.TRANSIENT_OPENED,
+            }:
+                return self._refresh_live_node_from_ref(node)
+        except Exception:
+            logger.debug("AXScrollToVisible failed for element %s", node.index, exc_info=True)
+        return node
+
+    def _try_ax_click_node(
+        self,
+        session: AppSession,
+        node: Node,
+        idx: int,
+        *,
+        button: str,
+        count: int,
+    ) -> str | None:
+        if count == 1 and button == "left" and "selectable" in node.states:
+            try:
+                mark = session.ax_outcome_monitor.mark() if session.ax_outcome_monitor is not None else None
+                accessibility.set_attribute(node, "AXSelected", True)
+                verification = self._verify_ax_contract(
+                    session,
+                    contract=VerificationContract(
+                        direct_verifier=lambda: "selected" in accessibility.node_from_ref(node.ax_ref).states
+                        if node.ax_ref is not None
+                        else False
+                    ),
+                    mark=mark,
+                )
+                if verification not in {
+                    ActionVerificationResult.CONFIRMED,
+                    ActionVerificationResult.TRANSIENT_OPENED,
+                }:
+                    return None
+                return f"Clicked element {idx} (AXSelected)"
+            except Exception:
+                logger.debug("AXSelected failed for element %d", idx)
+
+        if button == "right":
+            try:
+                mark = session.ax_outcome_monitor.mark() if session.ax_outcome_monitor is not None else None
+                accessibility.perform_action(node, "AXShowMenu")
+                transient_source = self._make_transient_source(
+                    session,
+                    node,
+                    action_name="AXShowMenu",
+                    reopen_fn=lambda resolved: _safe_perform_action(resolved, "AXShowMenu"),
+                    graph_kind=self._active_graph(session).kind if self._active_graph(session) is not None else GraphKind.PERSISTENT,
+                )
+                verification = self._verify_ax_contract(
+                    session,
+                    contract=VerificationContract(expect_transient_open=True),
+                    mark=mark,
+                    transient_source=transient_source,
+                )
+                if verification not in {
+                    ActionVerificationResult.CONFIRMED,
+                    ActionVerificationResult.TRANSIENT_OPENED,
+                }:
+                    return None
+                return f"Right-clicked element {idx} (AXShowMenu)"
+            except Exception:
+                logger.debug("AXShowMenu failed for element %d", idx)
+                if session.input_strategy is not None:
+                    session.input_strategy.record_ax_failure()
+                return None
+
+        if count == 1 and button == "left":
+            if self._should_force_pointer_for_node(node):
+                return None
+            try:
+                mark = session.ax_outcome_monitor.mark() if session.ax_outcome_monitor is not None else None
+                accessibility.perform_action(node, "AXPress")
+                verification = self._verify_ax_contract(
+                    session,
+                    contract=VerificationContract(),
+                    mark=mark,
+                )
+                if verification not in {
+                    ActionVerificationResult.CONFIRMED,
+                    ActionVerificationResult.TRANSIENT_OPENED,
+                }:
+                    return None
+                return f"Clicked element {idx} (AXPress)"
+            except Exception:
+                logger.debug("AXPress failed for element %d", idx)
+                if session.input_strategy is not None:
+                    session.input_strategy.record_ax_failure()
+        return None
+
+    def _try_ax_hit_test_click(
+        self,
+        session: AppSession,
+        node: Node,
+        idx: int,
+        *,
+        button: str,
+        count: int,
+    ) -> str | None:
+        if count != 1:
+            return None
+        target_node = self._resolve_click_target_node(session, node)
+        point = self._click_point_for_node(session, target_node)
+        if point is None:
+            return None
+        hit_ref = accessibility.element_at_position(session.target.ax_app, point[0], point[1])
+        if hit_ref is None:
+            return None
+        try:
+            mark = session.ax_outcome_monitor.mark() if session.ax_outcome_monitor is not None else None
+            if button == "right":
+                accessibility.perform_action_on_ref(hit_ref, "AXShowMenu")
+                transient_source = None
+                try:
+                    hit_node = accessibility.node_from_ref(hit_ref)
+                    transient_source = self._make_transient_source(
+                        session,
+                        hit_node,
+                        action_name="AXShowMenu",
+                        reopen_fn=lambda resolved: _safe_perform_action(resolved, "AXShowMenu"),
+                        graph_kind=self._active_graph(session).kind if self._active_graph(session) is not None else GraphKind.PERSISTENT,
+                    )
+                except Exception:
+                    transient_source = None
+                verification = self._verify_ax_contract(
+                    session,
+                    contract=VerificationContract(expect_transient_open=True),
+                    mark=mark,
+                    transient_source=transient_source,
+                )
+                if verification not in {
+                    ActionVerificationResult.CONFIRMED,
+                    ActionVerificationResult.TRANSIENT_OPENED,
+                }:
+                    return None
+                return f"Right-clicked element {idx} (AX hit-test)"
+            accessibility.perform_action_on_ref(hit_ref, "AXPress")
+            verification = self._verify_ax_contract(
+                session,
+                contract=VerificationContract(),
+                mark=mark,
+            )
+            if verification not in {
+                ActionVerificationResult.CONFIRMED,
+                ActionVerificationResult.TRANSIENT_OPENED,
+            }:
+                return None
+            return f"Clicked element {idx} (AX hit-test)"
+        except Exception:
+            logger.debug("AX hit-test action failed for element %d", idx)
+            return None
+
+    def _try_ax_hit_test_click_at_point(
+        self,
+        session: AppSession,
+        x: float,
+        y: float,
+        *,
+        display_x: float,
+        display_y: float,
+        button: str,
+        count: int,
+    ) -> str | None:
+        if count != 1:
+            return None
+        hit_ref = accessibility.element_at_position(session.target.ax_app, x, y)
+        if hit_ref is None:
+            return None
+
+        try:
+            hit_node = accessibility.node_from_ref(hit_ref)
+        except Exception:
+            hit_node = None
+
+        if (
+            hit_node is not None
+            and session.input_strategy is not None
+            and not session.input_strategy.should_use_ax_action(
+                "click",
+                is_web_area=hit_node.is_web_area,
+            )
+        ):
+            return None
+
+        try:
+            mark = session.ax_outcome_monitor.mark() if session.ax_outcome_monitor is not None else None
+            if button == "right":
+                accessibility.perform_action_on_ref(hit_ref, "AXShowMenu")
+                transient_source = self._make_transient_source(
+                    session,
+                    hit_node if hit_node is not None else accessibility.node_from_ref(hit_ref),
+                    action_name="AXShowMenu",
+                    reopen_fn=lambda resolved: _safe_perform_action(resolved, "AXShowMenu"),
+                    graph_kind=self._active_graph(session).kind if self._active_graph(session) is not None else GraphKind.PERSISTENT,
+                )
+                verification = self._verify_ax_contract(
+                    session,
+                    contract=VerificationContract(expect_transient_open=True),
+                    mark=mark,
+                    transient_source=transient_source,
+                )
+                if verification not in {
+                    ActionVerificationResult.CONFIRMED,
+                    ActionVerificationResult.TRANSIENT_OPENED,
+                }:
+                    return None
+                return f"Right-clicked at ({display_x}, {display_y}) (AX hit-test)"
+            accessibility.perform_action_on_ref(hit_ref, "AXPress")
+            verification = self._verify_ax_contract(
+                session,
+                contract=VerificationContract(),
+                mark=mark,
+            )
+            if verification not in {
+                ActionVerificationResult.CONFIRMED,
+                ActionVerificationResult.TRANSIENT_OPENED,
+            }:
+                return None
+            return f"Clicked at ({display_x}, {display_y}) (AX hit-test)"
+        except Exception:
+            logger.debug("AX hit-test action failed at (%s, %s)", x, y)
+            if session.input_strategy is not None:
+                session.input_strategy.record_ax_failure()
+            return None
 
     def _has_web_ancestor(self, nodes: list[Node], idx: int) -> bool:
         node = nodes[idx]
@@ -819,51 +1450,115 @@ class SessionManager:
         return False
 
     def _should_prefer_pointer_input(self, session: AppSession, node: Node) -> bool:
+        has_web_ancestor = (
+            node.index is not None
+            and node.index < len(session.tree_nodes)
+            and self._has_web_ancestor(session.tree_nodes, node.index)
+        )
+        if session.input_strategy is not None and not session.input_strategy.should_use_ax_action(
+            "click",
+            is_web_area=node.is_web_area or has_web_ancestor,
+        ):
+            return True
         if node.role not in _POINTER_PREFERRED_ROLES:
             return False
-        if node.index >= len(session.tree_nodes):
+        if node.index is None or node.index >= len(session.tree_nodes):
             return False
-        return self._has_web_ancestor(session.tree_nodes, node.index)
+        if self._should_force_pointer_for_node(node):
+            return True
+        return has_web_ancestor
+
+    def _node_action_names(self, node: Node) -> set[str]:
+        if node.ax_ref is None:
+            return set(node.secondary_actions)
+        try:
+            return set(accessibility.get_action_names_for_ref(node.ax_ref))
+        except Exception:
+            logger.debug("Failed to read raw AX actions for node %s", node.index, exc_info=True)
+            return set(node.secondary_actions)
+
+    def _should_force_pointer_for_node(self, node: Node) -> bool:
+        if node.ax_role not in _BUTTONISH_AX_ROLES:
+            return False
+        action_names = self._node_action_names(node)
+        if not action_names:
+            return False
+        return action_names.isdisjoint(_AX_ACTIVATION_ACTIONS)
+
+    def _node_identity(self, node: Node) -> tuple[str | None, str | None, str | None]:
+        return (node.ax_id, node.description, node.label)
+
+    def _selection_container_node(self, session: AppSession, node: Node) -> Node | None:
+        candidates = [self._refresh_live_node_from_ref(node)]
+        candidates.extend(self._iter_live_click_ancestors(node))
+        if self._node_has_current_snapshot_index(session, node):
+            candidates.extend(self._iter_node_ancestors(session, node) or [])
+        for candidate in candidates:
+            if candidate.role in _SELECTION_CONTAINER_ROLES and candidate.ax_ref is not None:
+                return candidate
+        return None
+
+    def _selected_identities_in_container(
+        self,
+        session: AppSession,
+        container: Node,
+    ) -> set[tuple[str | None, str | None, str | None]]:
+        if container.ax_ref is None:
+            return set()
+        try:
+            subtree = accessibility.walk_tree(
+                container.ax_ref,
+                include_actions=False,
+                target_pid=self._background_pid_for_node(session, container),
+            )
+        except Exception:
+            logger.debug("Failed to collect selection subtree for node %s", container.index, exc_info=True)
+            return set()
+        return {
+            self._node_identity(item)
+            for item in subtree
+            if "selected" in item.states
+        }
+
+    def _make_selection_click_verifier(
+        self,
+        session: AppSession,
+        node: Node,
+    ) -> Callable[[], bool] | None:
+        if not self._should_force_pointer_for_node(node):
+            return None
+        container = self._selection_container_node(session, node)
+        if container is None:
+            return None
+        baseline_selected = self._selected_identities_in_container(session, container)
+        target_identity = self._node_identity(node)
+
+        def _verifier() -> bool:
+            refreshed = self._refresh_live_node_from_ref(node)
+            if "selected" in refreshed.states:
+                return True
+            refreshed_container = self._refresh_live_node_from_ref(container)
+            selected_after = self._selected_identities_in_container(session, refreshed_container)
+            return selected_after != baseline_selected and target_identity in selected_after
+
+        return _verifier
 
     def _focus_node_for_keyboard_input(self, session: AppSession, node: Node) -> bool:
         """Focus an element for keyboard input WITHOUT activating the app.
 
-        Prefers AX focus (no activation) over CGEvent click (may activate).
-        AXPress is avoided because it causes many apps to self-activate,
-        stealing focus from the user's current app.
+        Uses element-level AX focus first and falls back to a background click
+        on the target element if the app does not expose a focusable AX field.
         """
-        # Primary: AX focus attribute (doesn't activate the app)
         try:
             accessibility.set_attribute(node, "AXFocused", True)
             time.sleep(0.02)
             return True
         except Exception:
             pass
-        # Fallback: background click at element center (may cause activation)
         if self._background_click_node(session, node):
             time.sleep(0.05)
             return True
         return False
-
-    def _ensure_target_window_focus(self, session: AppSession) -> None:
-        """Set AX focus on the target window so keyboard events route correctly.
-
-        CGEventPostToPid delivers keyboard events to the PID's key window.
-        Setting AXFocused/AXMain on our target window changes the app's
-        internal focus state without activating the app or stealing focus.
-        """
-        if session.target.ax_window is None:
-            return
-        from ApplicationServices import AXUIElementSetAttributeValue
-        try:
-            AXUIElementSetAttributeValue(session.target.ax_window, "AXFocused", True)
-            return
-        except Exception:
-            pass
-        try:
-            AXUIElementSetAttributeValue(session.target.ax_window, "AXMain", True)
-        except Exception:
-            logger.debug("Cannot set window focus for %s", session.target.bundle_id)
 
     def _build_app_state(self, target: AppTarget, window_title: str | None) -> AppState:
         """Build geometry metadata for the app state response."""
@@ -932,15 +1627,524 @@ class SessionManager:
             cursor_position=cursor_position,
         )
 
+    def _should_annotate_geometry(self, node: Node) -> bool:
+        if node.role in _GEOMETRY_HINT_ROLES:
+            return True
+        if node.role in _TEXT_GROUNDING_ROLES and node.label:
+            return True
+        if node.secondary_actions:
+            return True
+        return "settable" in node.states
+
+    def _screen_frame_to_screenshot_frame(
+        self,
+        frame: tuple[float, float, float, float],
+        visible_rect: Rect,
+        screenshot_size: tuple[int, int],
+    ) -> tuple[float, float, float, float] | None:
+        fx, fy, fw, fh = frame
+        if fw <= 0 or fh <= 0 or visible_rect.w <= 0 or visible_rect.h <= 0:
+            return None
+
+        ix = max(fx, visible_rect.x)
+        iy = max(fy, visible_rect.y)
+        iw = min(fx + fw, visible_rect.x + visible_rect.w) - ix
+        ih = min(fy + fh, visible_rect.y + visible_rect.h) - iy
+        if iw <= 0 or ih <= 0:
+            return None
+
+        shot_width, shot_height = screenshot_size
+        scale_x = shot_width / visible_rect.w
+        scale_y = shot_height / visible_rect.h
+        return (
+            (ix - visible_rect.x) * scale_x,
+            (iy - visible_rect.y) * scale_y,
+            iw * scale_x,
+            ih * scale_y,
+        )
+
+    def _annotate_node_geometry(
+        self,
+        nodes: list[Node],
+        app_state: AppState | None,
+        screenshot_size: tuple[int, int] | None,
+    ) -> None:
+        for node in nodes:
+            node.position = None
+            node.size = None
+
+        if app_state is None or app_state.visible_rect is None or screenshot_size is None:
+            return
+        if (
+            not isinstance(screenshot_size, tuple)
+            or len(screenshot_size) != 2
+            or not all(isinstance(v, (int, float)) for v in screenshot_size)
+        ):
+            return
+
+        annotated = 0
+        for node in nodes:
+            if annotated >= GEOMETRY_HINT_LIMIT:
+                break
+            if not self._should_annotate_geometry(node):
+                continue
+            frame = accessibility.get_element_frame(node)
+            if frame is None:
+                continue
+            screenshot_frame = self._screen_frame_to_screenshot_frame(
+                frame,
+                app_state.visible_rect,
+                screenshot_size,
+            )
+            if screenshot_frame is None:
+                continue
+            node.position = Point(x=screenshot_frame[0], y=screenshot_frame[1])
+            node.size = Size(w=screenshot_frame[2], h=screenshot_frame[3])
+            annotated += 1
+
+    def _collect_tree_nodes(
+        self,
+        ax_window: Any,
+        *,
+        ax_app: Any | None = None,
+        target_pid: int | None = None,
+        app_type: AppType | None = None,
+    ) -> list[Node]:
+        return accessibility.walk_tree(ax_window, target_pid=target_pid)
+
+    def _walk_interaction_tree(
+        self,
+        ax_window: Any,
+        *,
+        ax_app: Any | None = None,
+        target_pid: int | None = None,
+        bundle_id: str | None = None,
+        app_type: AppType | None = None,
+    ) -> list[Node]:
+        nodes = self._collect_tree_nodes(
+            ax_window,
+            ax_app=ax_app,
+            target_pid=target_pid,
+            app_type=app_type,
+        )
+        return self._prune_tree_nodes(
+            nodes,
+            bundle_id=bundle_id,
+            app_type=app_type,
+            ax_app=ax_app,
+            target_pid=target_pid,
+        )
+
+    def _normalize_focused_index(self, nodes: list[Node], focused_index: int | None) -> int | None:
+        index = focused_index
+        if index is None or not (0 <= index < len(nodes)):
+            index = self._focused_index_from_states(nodes)
+            if index is None:
+                return None
+
+        node = nodes[index]
+        if node.ax_role == "AXList" and node.subrole == "AXCollectionList":
+            index = 0 if nodes else index
+
+        if feature_flags.codex_tree_style:
+            ancestor_index = self._preferred_focus_ancestor(nodes, index)
+            if ancestor_index is not None:
+                return ancestor_index
+        return index
+
+    def _focused_index_from_states(self, nodes: list[Node]) -> int | None:
+        for position, node in enumerate(nodes):
+            if any(str(state).lower() == "focused" for state in node.states):
+                return position
+        return None
+
+    def _preferred_focus_ancestor(self, nodes: list[Node], focused_index: int) -> int | None:
+        if not (0 <= focused_index < len(nodes)):
+            return None
+        focused_node = nodes[focused_index]
+        if focused_node.role not in {"text area", "text field"}:
+            return None
+        target_depth = focused_node.depth
+        for position in range(focused_index - 1, -1, -1):
+            candidate = nodes[position]
+            if candidate.depth >= target_depth:
+                continue
+            if candidate.role in _WEB_CONTAINER_ROLES:
+                return position
+            target_depth = candidate.depth
+        return None
+
+    def _prune_tree_nodes(
+        self,
+        nodes: list[Node],
+        *,
+        bundle_id: str | None = None,
+        app_type: AppType | None = None,
+        ax_app: Any | None = None,
+        target_pid: int | None = None,
+    ) -> list[Node]:
+        if not feature_flags.tree_pruning or not nodes:
+            return nodes
+
+        use_codex_tree = feature_flags.codex_tree_style
+
+        if use_codex_tree:
+            from app._lib.pruning import prune_for_codex_tree
+            if ax_app is not None:
+                menu_bar = accessibility.get_menu_bar(ax_app)
+                if menu_bar is not None:
+                    menu_nodes = accessibility.walk_tree(menu_bar, target_pid=target_pid)
+                    if menu_nodes:
+                        filtered_menu_nodes: list[Node] = []
+                        for node in menu_nodes:
+                            # Codex-style output only shows the top-level menu bar
+                            # and its immediate items, not expanded menu trees.
+                            if node.depth > 1:
+                                continue
+                            if node.depth == 1 and (node.label or node.description) == "Apple":
+                                continue
+                            node.depth += 1
+                            filtered_menu_nodes.append(node)
+                        nodes = [*nodes, *filtered_menu_nodes]
+            return prune_for_codex_tree(nodes, bundle_id=bundle_id)
+
+        from app._lib.pruning import prune as prune_nodes
+        pruned_nodes, _, _ = prune_nodes(
+            nodes,
+            advanced=feature_flags.advanced_pruning,
+            bundle_id=bundle_id,
+        )
+        return pruned_nodes
+
+    def _active_graph(self, session: AppSession) -> GraphRecord | None:
+        return self._graph_registry.active_graph(session.graphs)
+
+    def _active_transient_surface(self, session: AppSession) -> TransientSurface | None:
+        if not feature_flags.transient_graphs or session.transient_graph_tracker is None:
+            return None
+        return session.transient_graph_tracker.active_surface
+
+    def _graph_state_getter(self, session: AppSession, graph_id: str) -> Any:
+        def _getter() -> GraphState:
+            graph = self._graph_registry.find(session.graphs, graph_id)
+            if graph is None:
+                return GraphState.CLOSED
+            if graph.kind == GraphKind.TRANSIENT and session.transient_graph_tracker is not None:
+                if not session.transient_graph_tracker.is_root_live(graph.root_ref):
+                    graph.state = GraphState.CLOSED
+                    return graph.state
+            if session.invalidation_monitor is not None and session.invalidation_monitor.is_invalidated:
+                graph.state = GraphState.INVALIDATED
+                return graph.state
+            return graph.state
+
+        return _getter
+
+    def _resolve_locator_in_graph(
+        self,
+        session: AppSession,
+        locator: Any,
+        *,
+        kind: GraphKind = GraphKind.PERSISTENT,
+    ) -> Node | None:
+        if locator is None:
+            return None
+        if kind == GraphKind.PERSISTENT:
+            graph = session.graphs.persistent_graph
+        else:
+            graph = self._active_graph(session)
+        if graph is None:
+            return None
+        return match_node_by_locator(graph.nodes, locator)
+
+    def _reopen_active_transient_graph(self, session: AppSession) -> list[Node] | None:
+        graph = self._active_graph(session)
+        if graph is None or graph.kind != GraphKind.TRANSIENT:
+            return None
+        source = graph.source
+        if source is None or source.reopen is None:
+            return None
+        graph.state = GraphState.REOPENING
+        if not source.reopen():
+            graph.state = GraphState.CLOSED
+            return None
+        snapshot = self.take_snapshot(session, skip_refresh=True)
+        return snapshot.tree_nodes
+
+    def _invalidate_session_for_user_change(self, session: AppSession, message: str) -> None:
+        session.user_state_invalidated = True
+        session.user_state_invalidated_message = message
+        if session.graphs.persistent_graph is not None:
+            session.graphs.persistent_graph.state = GraphState.INVALIDATED
+        for graph in session.graphs.transient_stack:
+            graph.state = GraphState.CLOSED
+        session.pending_transient_source = None
+
+    def _clear_user_invalidated_state(self, session: AppSession) -> None:
+        session.user_state_invalidated = False
+        session.user_state_invalidated_message = None
+
+    def _dismiss_transient_surface(self, session: AppSession, graph: GraphRecord) -> None:
+        if graph.kind != GraphKind.TRANSIENT:
+            return
+        tracker = session.transient_graph_tracker
+        if tracker is None or not tracker.is_root_live(graph.root_ref):
+            graph.state = GraphState.CLOSED
+            return
+
+        actions = set(accessibility.get_action_names_for_ref(graph.root_ref))
+        dismiss_actions = [action for action in ("AXCancel", "AXPress") if action in actions]
+
+        for action in dismiss_actions:
+            try:
+                mark = session.ax_outcome_monitor.mark() if session.ax_outcome_monitor is not None else None
+                accessibility.perform_action_on_ref(graph.root_ref, action)
+                verification = self._verify_ax_contract(
+                    session,
+                    contract=VerificationContract(expect_transient_close=True),
+                    mark=mark,
+                    timeout=0.2,
+                )
+                if verification in {
+                    ActionVerificationResult.CONFIRMED,
+                    ActionVerificationResult.TRANSIENT_CLOSED,
+                }:
+                    graph.state = GraphState.CLOSED
+                    return
+            except Exception:
+                logger.debug("Transient dismiss via %s failed", action, exc_info=True)
+
+        if tracker is not None and not tracker.is_root_live(graph.root_ref):
+            graph.state = GraphState.CLOSED
+
+    def _make_transient_source(
+        self,
+        session: AppSession,
+        node: Node,
+        *,
+        action_name: str,
+        reopen_fn: Callable[[Node], bool],
+        graph_kind: GraphKind = GraphKind.PERSISTENT,
+    ) -> TransientSource:
+        locator = getattr(node, "graph_locator", None)
+
+        def _reopen() -> bool:
+            resolved = self._resolve_locator_in_graph(session, locator, kind=graph_kind)
+            if resolved is None:
+                return False
+            return reopen_fn(resolved)
+
+        return TransientSource(
+            action_name=action_name,
+            node_locator=locator,
+            graph_kind=graph_kind,
+            description=node.label or node.description or node.role,
+            reopen=_reopen,
+        )
+
+    def _verify_ax_contract(
+        self,
+        session: AppSession,
+        *,
+        contract: VerificationContract,
+        mark: tuple[int, int, int] | None,
+        transient_source: TransientSource | None = None,
+        timeout: float = 0.35,
+    ) -> ActionVerificationResult:
+        if not feature_flags.ax_action_verification or session.ax_outcome_monitor is None:
+            if transient_source is not None:
+                session.pending_transient_source = transient_source
+            if contract.direct_verifier is not None:
+                deadline = time.monotonic() + timeout
+                while time.monotonic() < deadline:
+                    try:
+                        if contract.direct_verifier():
+                            return ActionVerificationResult.CONFIRMED
+                    except Exception:
+                        logger.debug("Direct verifier raised", exc_info=True)
+                    time.sleep(0.01)
+                return ActionVerificationResult.TIMEOUT
+            return ActionVerificationResult.CONFIRMED
+        result = session.ax_outcome_monitor.verify(contract=contract, mark=mark, timeout=timeout)
+        session.last_action_verification = result
+        if result == ActionVerificationResult.TRANSIENT_OPENED and transient_source is not None:
+            session.pending_transient_source = transient_source
+        return result
+
+    def _verify_cgevent_contract(
+        self,
+        session: AppSession,
+        *,
+        expectation: Any,
+        transport_mark: int,
+        contract: VerificationContract,
+        notification_mark: tuple[int, int, int] | None,
+        transient_source: TransientSource | None = None,
+        timeout: float = 0.35,
+    ) -> ActionVerificationResult:
+        if not feature_flags.cgevent_action_verification:
+            if transient_source is not None:
+                session.pending_transient_source = transient_source
+            return ActionVerificationResult.CONFIRMED
+
+        if session.cgevent_outcome_monitor is None:
+            outcome = self._verify_ax_contract(
+                session,
+                contract=contract,
+                mark=notification_mark,
+                transient_source=transient_source,
+                timeout=timeout,
+            )
+            if contract.direct_verifier is not None or contract.expect_transient_open or contract.expect_transient_close:
+                return outcome
+            return ActionVerificationResult.CONFIRMED
+
+        transport_ok = session.cgevent_outcome_monitor.verify_transport(
+            start_sequence=transport_mark,
+            expectation=expectation,
+            timeout=min(timeout, 0.25),
+        )
+        outcome = self._verify_ax_contract(
+            session,
+            contract=contract,
+            mark=notification_mark,
+            transient_source=transient_source,
+            timeout=timeout,
+        )
+        if transport_ok and outcome in {
+            ActionVerificationResult.CONFIRMED,
+            ActionVerificationResult.TRANSIENT_OPENED,
+            ActionVerificationResult.TRANSIENT_CLOSED,
+        }:
+            return outcome
+        if transport_ok:
+            return ActionVerificationResult.NO_EFFECT
+        return ActionVerificationResult.TIMEOUT
+
+    def _take_transient_snapshot(
+        self,
+        session: AppSession,
+        surface: TransientSurface,
+    ) -> ToolResponse:
+        """Capture a transient-only snapshot without rebuilding the main window state.
+
+        This is the fast path for menus, context menus, and popovers that open
+        from an already-established persistent graph. We only walk the transient
+        root, keep the persistent graph cached underneath, and skip screenshot,
+        geometry, rich-text extraction, and other heavyweight persistent-window
+        work.
+        """
+        t = session.target
+        root_ref = surface.root_ref
+        nodes = self._collect_tree_nodes(
+            root_ref,
+            ax_app=t.ax_app,
+            target_pid=t.pid,
+            app_type=session.app_type,
+        )
+        nodes = self._prune_tree_nodes(
+            nodes,
+            bundle_id=t.bundle_id,
+            app_type=session.app_type,
+            ax_app=None,
+            target_pid=t.pid,
+        )
+
+        active_graph = self._graph_registry.push_transient(
+            session.graphs,
+            root_ref=root_ref,
+            nodes=nodes,
+            root_locator=None,
+            source=session.pending_transient_source,
+            transient_kind=surface.kind,
+        )
+        session.pending_transient_source = None
+        annotate_graph_nodes(nodes, active_graph.graph_id, active_graph.generation)
+        active_graph.nodes = nodes
+        active_graph.root_locator = nodes[0].graph_locator if nodes else None
+
+        tree_text = serialize(
+            nodes,
+            focused_index=None,
+            enable_pruning=False,
+            codex_style=feature_flags.codex_tree_style,
+        )
+
+        window_title = self._get_window_title(t.ax_window) if t.ax_window is not None else None
+        header = make_header(
+            t.bundle_id,
+            t.pid,
+            window_title,
+            t.window_id,
+            t.window_pid,
+            None,
+            app_state=None,
+            codex_style=feature_flags.codex_tree_style,
+        )
+
+        session.snapshot_id += 1
+        session.tree_nodes = nodes
+        session.screenshot_size = None
+
+        refetch_walk = (
+            lambda ax_window, *, target_pid=None, bundle_id=t.bundle_id, app_type=session.app_type, ax_app=t.ax_app: self._walk_interaction_tree(
+                ax_window,
+                ax_app=ax_app,
+                target_pid=target_pid,
+                bundle_id=bundle_id,
+                app_type=app_type,
+            )
+        )
+        reopen_cb = lambda: self._reopen_active_transient_graph(session)
+        if active_graph.refetchable_tree is not None:
+            active_graph.refetchable_tree.update(
+                nodes,
+                ax_window=root_ref,
+                monitor=session.invalidation_monitor,
+                graph_id=active_graph.graph_id,
+                generation=active_graph.generation,
+                graph_state_getter=self._graph_state_getter(session, active_graph.graph_id),
+                reopen_fn=reopen_cb,
+            )
+        else:
+            active_graph.refetchable_tree = RefetchableTree(
+                nodes=nodes,
+                monitor=session.invalidation_monitor,
+                ax_window=root_ref,
+                target_pid=t.pid,
+                walk_fn=refetch_walk,
+                graph_id=active_graph.graph_id,
+                generation=active_graph.generation,
+                graph_state_getter=self._graph_state_getter(session, active_graph.graph_id),
+                reopen_fn=reopen_cb,
+            )
+        session.refetchable_tree = active_graph.refetchable_tree
+        self._dismiss_transient_surface(session, active_graph)
+
+        return ToolResponse(
+            app=t.bundle_id,
+            pid=t.pid,
+            snapshot_id=session.snapshot_id,
+            window_title=window_title,
+            tree_text=f"{header}\n\n{tree_text}",
+            tree_nodes=nodes,
+            focused_element=None,
+            screenshot=None,
+            app_state=None,
+            system_selection=None,
+        )
+
     def take_snapshot(self, session: AppSession, *, skip_refresh: bool = False) -> ToolResponse:
+        transient_surface = self._active_transient_surface(session)
+
         # Step 1: Refresh references for the targeted window
         # (skipped when the caller just validated the session, e.g. get_app_state)
-        if not skip_refresh:
+        if not skip_refresh and transient_surface is None:
             self._refresh_window(session)
         t = session.target
 
         # Retry once if the AX reference for the targeted window is temporarily unavailable
-        if t.ax_window is None:
+        if t.ax_window is None and transient_surface is None:
             time.sleep(WINDOW_RETRY_DELAY_S)
             self._refresh_window(session)
             if t.ax_window is None:
@@ -948,22 +2152,37 @@ class SessionManager:
                     f"Target window {t.window_id} in {t.bundle_id} is no longer available."
                 )
 
+        if transient_surface is not None:
+            return self._take_transient_snapshot(session, transient_surface)
+
         # Step 1b: Update/create ApplicationWindow bridge
         self._update_application_window(session)
+
+        graph_kind = GraphKind.PERSISTENT
+        root_ref = t.ax_window
+        capture_screenshot = True
+        include_menu_bar = True
+        transient_kind: str | None = None
 
         # Step 2: Walk AX tree (use cache if tree not invalidated)
         if (
             session.refetchable_tree is not None
             and not session.refetchable_tree.is_invalidated
+            and graph_kind == GraphKind.PERSISTENT
         ):
             nodes = session.refetchable_tree.nodes
             logger.debug("Using cached AX tree (%d nodes, not invalidated)", len(nodes))
         else:
             with controller_tracer.interval("Walk AX Tree"):
-                nodes = accessibility.walk_tree(t.ax_window, target_pid=t.pid)
+                nodes = self._collect_tree_nodes(
+                    root_ref,
+                    ax_app=t.ax_app,
+                    target_pid=t.pid,
+                    app_type=session.app_type,
+                )
         # Step 3: Capture screenshot — SCK primary, CGWindowListCreateImage fallback
-        img = self._capture_screenshot(session, t)
-        if img is None:
+        img = self._capture_screenshot(session, t) if capture_screenshot else None
+        if capture_screenshot and img is None:
             # Retry: refresh window references and try again
             time.sleep(SCREENSHOT_RETRY_DELAY_S)
             self._refresh_window(session)
@@ -973,7 +2192,12 @@ class SessionManager:
                     f"Target window {t.window_id} in {t.bundle_id} disappeared while capturing a snapshot."
                 )
             with controller_tracer.interval("Walk AX Tree (retry)"):
-                nodes = accessibility.walk_tree(t.ax_window, target_pid=t.pid)
+                nodes = self._collect_tree_nodes(
+                    t.ax_window,
+                    ax_app=t.ax_app,
+                    target_pid=t.pid,
+                    app_type=session.app_type,
+                )
             img = self._capture_screenshot(session, t)
             if img is None:
                 logger.warning(
@@ -981,7 +2205,12 @@ class SessionManager:
                     t.window_id, t.bundle_id,
                 )
         # Step 4: Query focused element
-        focused = accessibility.get_focused_element(t.ax_app, nodes)
+        focused = self._normalize_focused_index(
+            nodes,
+            accessibility.get_focused_element(t.ax_app, nodes) if graph_kind == GraphKind.PERSISTENT else None,
+        )
+        transport_img = screenshot.prepare_image_for_transport(img) if img else None
+        session.screenshot_size = transport_img.size if transport_img else None
         # Step 5: Build geometry metadata
         window_title = self._get_window_title(t.ax_window)
         app_state = self._build_app_state(t, window_title)
@@ -997,41 +2226,49 @@ class SessionManager:
         # via node.index = new_idx. We must use the PRUNED list for
         # session.tree_nodes so that the indexes the model sees in the tree
         # text match what _resolve_index looks up by list position.
-        if feature_flags.tree_pruning and nodes:
-            from app._lib.pruning import prune as prune_nodes
-            pruned_nodes, _, _ = prune_nodes(
-                nodes,
-                advanced=feature_flags.advanced_pruning,
-                bundle_id=t.bundle_id,
-            )
-            # Serialize the already-pruned nodes (no double-prune)
-            tree_text = serialize(pruned_nodes, focused, enable_pruning=False)
-            nodes = pruned_nodes
-        else:
-            tree_text = serialize(nodes, focused, enable_pruning=False)
-        # Step 6b: Enforce byte budget — drop oldest lines if tree_text is too large
-        tree_bytes = len(tree_text.encode("utf-8"))
-        if tree_bytes > TREE_BYTE_BUDGET:
-            lines = tree_text.split("\n")
-            # Binary search: find how many lines to keep from the end to fit budget
-            # Keep at least 1 line (the focused element summary if present)
-            lo, hi = 1, len(lines)
-            while lo < hi:
-                mid = (lo + hi + 1) // 2
-                candidate = "\n".join(lines[-mid:])
-                if len(candidate.encode("utf-8")) <= TREE_BYTE_BUDGET - 80:  # room for truncation notice
-                    lo = mid
-                else:
-                    hi = mid - 1
-            dropped = len(lines) - lo
-            if dropped > 0:
-                tree_text = f"({dropped} lines truncated — tree exceeded {TREE_BYTE_BUDGET // 1000}KB budget)\n" + "\n".join(lines[-lo:])
-                logger.info(
-                    "Tree byte budget enforced for %s: %d bytes → %d bytes (%d lines dropped)",
-                    t.bundle_id, tree_bytes, len(tree_text.encode("utf-8")), dropped,
+        nodes = self._prune_tree_nodes(
+            nodes,
+            bundle_id=t.bundle_id,
+            app_type=session.app_type,
+            ax_app=t.ax_app if include_menu_bar else None,
+            target_pid=t.pid,
+        )
+        focused = self._normalize_focused_index(
+            nodes,
+            accessibility.get_focused_element(t.ax_app, nodes) if graph_kind == GraphKind.PERSISTENT else None,
+        )
+        self._annotate_node_geometry(nodes, app_state, session.screenshot_size)
+        active_graph: GraphRecord | None = None
+        if feature_flags.transient_graphs:
+            if graph_kind == GraphKind.TRANSIENT:
+                active_graph = self._graph_registry.push_transient(
+                    session.graphs,
+                    root_ref=root_ref,
+                    nodes=nodes,
+                    root_locator=None,
+                    source=session.pending_transient_source,
+                    transient_kind=transient_kind,
                 )
+                session.pending_transient_source = None
+            else:
+                if session.graphs.transient_stack:
+                    self._graph_registry.mark_transients_closed(session.graphs)
+                active_graph = self._graph_registry.set_persistent(
+                    session.graphs,
+                    root_ref=root_ref,
+                    nodes=nodes,
+                    root_locator=None,
+                )
+            annotate_graph_nodes(nodes, active_graph.graph_id, active_graph.generation)
+            active_graph.nodes = nodes
+            active_graph.root_locator = nodes[0].graph_locator if nodes else None
+        tree_text = serialize(
+            nodes,
+            focused,
+            enable_pruning=False,
+            codex_style=feature_flags.codex_tree_style,
+        )
         # Step 7: Build header
-        session.screenshot_size = img.size if img else None
         screenshot_size = session.screenshot_size
         header = make_header(
             t.bundle_id,
@@ -1041,6 +2278,7 @@ class SessionManager:
             t.window_pid,
             screenshot_size,
             app_state=app_state,
+            codex_style=feature_flags.codex_tree_style,
         )
         # Step 8: Increment snapshot_id
         session.snapshot_id += 1
@@ -1048,9 +2286,53 @@ class SessionManager:
         # nodes is now the pruned list — indexes match what the model sees
         session.tree_nodes = nodes
         # Step 9b: Update/create RefetchableTree
-        if session.refetchable_tree is not None:
+        refetch_walk = (
+            lambda ax_window, *, target_pid=None, bundle_id=t.bundle_id, app_type=session.app_type, ax_app=t.ax_app: self._walk_interaction_tree(
+                ax_window,
+                ax_app=ax_app,
+                target_pid=target_pid,
+                bundle_id=bundle_id,
+                app_type=app_type,
+            )
+        )
+        if feature_flags.transient_graphs and active_graph is not None:
+            reopen_cb = (
+                (lambda: self._reopen_active_transient_graph(session))
+                if active_graph.kind == GraphKind.TRANSIENT
+                else None
+            )
+            if active_graph.refetchable_tree is not None:
+                active_graph.refetchable_tree.update(
+                    nodes,
+                    ax_window=root_ref,
+                    monitor=session.invalidation_monitor,
+                    target_pid=t.pid,
+                    walk_fn=refetch_walk,
+                    graph_id=active_graph.graph_id,
+                    generation=active_graph.generation,
+                    graph_state_getter=self._graph_state_getter(session, active_graph.graph_id),
+                    reopen_fn=reopen_cb,
+                )
+            else:
+                active_graph.refetchable_tree = RefetchableTree(
+                    nodes,
+                    session.invalidation_monitor,
+                    ax_window=root_ref,
+                    target_pid=t.pid,
+                    walk_fn=refetch_walk,
+                    graph_id=active_graph.graph_id,
+                    generation=active_graph.generation,
+                    graph_state_getter=self._graph_state_getter(session, active_graph.graph_id),
+                    reopen_fn=reopen_cb,
+                )
+            session.refetchable_tree = active_graph.refetchable_tree
+        elif session.refetchable_tree is not None:
             session.refetchable_tree.update(
-                nodes, ax_window=t.ax_window, target_pid=t.pid,
+                nodes,
+                ax_window=t.ax_window,
+                monitor=session.invalidation_monitor,
+                target_pid=t.pid,
+                walk_fn=refetch_walk,
             )
         else:
             session.refetchable_tree = RefetchableTree(
@@ -1058,9 +2340,11 @@ class SessionManager:
                 session.invalidation_monitor,
                 ax_window=t.ax_window,
                 target_pid=t.pid,
-                walk_fn=accessibility.walk_tree,
+                walk_fn=refetch_walk,
             )
         # Step 10: Return ToolResponse
+        if feature_flags.transient_graphs and active_graph is not None and active_graph.kind == GraphKind.TRANSIENT:
+            self._dismiss_transient_surface(session, active_graph)
 
         return ToolResponse(
             app=t.bundle_id,
@@ -1070,7 +2354,7 @@ class SessionManager:
             tree_text=f"{header}\n\n{tree_text}",
             tree_nodes=nodes,
             focused_element=focused,
-            screenshot=screenshot.image_to_base64(img) if img else None,
+            screenshot=screenshot.image_to_base64(transport_img) if transport_img else None,
             app_state=app_state,
             system_selection=selection_text,
         )
@@ -1230,10 +2514,9 @@ class SessionManager:
     # ------------------------------------------------------------------
 
     def _handle_click(self, session: AppSession, params: dict) -> str:
-        """Click via background CGEvent, with AX fallbacks.
+        """Click via background CGEvent, with AX fallbacks only as a last resort.
 
-        By element: CGEventPostToPid → AXPress → AXSelected → AXShowMenu
-        → repeated AXPress.
+        By element: CGEventPostToPid first, then AX recovery if background delivery fails.
         By coords:  CGEventPostToPid → AX hit-test fallback.
         """
         t = session.target
@@ -1246,45 +2529,31 @@ class SessionManager:
         if element_index is not None:
             idx = int(element_index)
             node = self._resolve_index(session, idx)
-            # --- Primary: Background click (CGEventPostToPid, no focus stealing) ---
+            prefer_pointer = self._should_prefer_pointer_input(session, node)
+            if not prefer_pointer:
+                ax_result = self._try_ax_click_node(
+                    session, node, idx, button=button, count=count,
+                )
+                if ax_result is not None:
+                    return ax_result
+                hit_result = self._try_ax_hit_test_click(
+                    session, node, idx, button=button, count=count,
+                )
+                if hit_result is not None:
+                    return hit_result
             if self._background_click_node(session, node, button=button, count=count):
                 return f"Clicked element {idx} (CGEventPostToPid)"
-
-            # --- Fallback: AX actions (element has no position or CGEvent failed) ---
-            # AXPress (may cause some apps to self-activate)
-            if count == 1 and button == "left":
-                try:
-                    accessibility.perform_action(node, "AXPress")
-                    return f"Clicked element {idx} (AXPress)"
-                except Exception:
-                    logger.debug("AXPress failed for element %d", idx)
-                    if session.input_strategy is not None:
-                        session.input_strategy.record_ax_failure()
-
-            # AXSelected for selectable rows/cells
-            if count == 1 and button == "left" and "selectable" in node.states:
-                try:
-                    accessibility.set_attribute(node, "AXSelected", True)
-                    return f"Clicked element {idx} (AXSelected)"
-                except Exception:
-                    logger.debug("AXSelected failed for element %d", idx)
-
-            # AXShowMenu for right-click
-            if button == "right":
-                try:
-                    accessibility.perform_action(node, "AXShowMenu")
-                    return f"Right-clicked element {idx} (AXShowMenu)"
-                except Exception:
-                    logger.debug("AXShowMenu failed for element %d", idx)
-
-            # Repeated AXPress for multi-click
-            if count > 1:
-                try:
-                    for _ in range(count):
-                        accessibility.perform_action(node, "AXPress")
-                    return f"Clicked element {idx} {count}x (AXPress)"
-                except Exception:
-                    logger.debug("Repeated AXPress failed for element %d", idx)
+            if prefer_pointer:
+                hit_result = self._try_ax_hit_test_click(
+                    session, node, idx, button=button, count=count,
+                )
+                if hit_result is not None:
+                    return hit_result
+                ax_result = self._try_ax_click_node(
+                    session, node, idx, button=button, count=count,
+                )
+                if ax_result is not None:
+                    return ax_result
 
             raise AutomationError(
                 f"Click failed for element {idx}. "
@@ -1292,7 +2561,28 @@ class SessionManager:
             )
 
         elif x is not None and y is not None:
+            sx, sy = self._to_screen_coords(session, t.window_id, float(x), float(y))
+            ax_result = self._try_ax_hit_test_click_at_point(
+                session,
+                sx,
+                sy,
+                display_x=float(x),
+                display_y=float(y),
+                button=button,
+                count=count,
+            )
+            if ax_result is not None:
+                return ax_result
+
             try:
+                transport_mark = 0
+                if session.cgevent_outcome_monitor is not None:
+                    _, transport_mark = session.cgevent_outcome_monitor.begin_action()
+                notification_mark = (
+                    session.ax_outcome_monitor.mark()
+                    if session.ax_outcome_monitor is not None
+                    else None
+                )
                 cg_input.click_at(
                     t.window_pid,
                     t.window_id,
@@ -1302,6 +2592,19 @@ class SessionManager:
                     count=count,
                     screenshot_size=session.screenshot_size,
                 )
+                if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
+                    verification = self._verify_cgevent_contract(
+                        session,
+                        expectation=expectation_for_click(button, count),
+                        transport_mark=transport_mark,
+                        contract=VerificationContract(expect_transient_open=(button == "right")),
+                        notification_mark=notification_mark,
+                    )
+                    if verification not in {
+                        ActionVerificationResult.CONFIRMED,
+                        ActionVerificationResult.TRANSIENT_OPENED,
+                    }:
+                        raise InputError("Coordinate click had no observed effect")
                 return f"Clicked at ({x}, {y}) (CGEventPostToPid)"
             except InputError as exc:
                 logger.debug(
@@ -1314,6 +2617,14 @@ class SessionManager:
                 self._refresh_window(session)
                 t = session.target
                 try:
+                    transport_mark = 0
+                    if session.cgevent_outcome_monitor is not None:
+                        _, transport_mark = session.cgevent_outcome_monitor.begin_action()
+                    notification_mark = (
+                        session.ax_outcome_monitor.mark()
+                        if session.ax_outcome_monitor is not None
+                        else None
+                    )
                     cg_input.click_at(
                         t.window_pid,
                         t.window_id,
@@ -1323,6 +2634,19 @@ class SessionManager:
                         count=count,
                         screenshot_size=session.screenshot_size,
                     )
+                    if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
+                        verification = self._verify_cgevent_contract(
+                            session,
+                            expectation=expectation_for_click(button, count),
+                            transport_mark=transport_mark,
+                            contract=VerificationContract(expect_transient_open=(button == "right")),
+                            notification_mark=notification_mark,
+                        )
+                        if verification not in {
+                            ActionVerificationResult.CONFIRMED,
+                            ActionVerificationResult.TRANSIENT_OPENED,
+                        }:
+                            raise InputError("Coordinate click had no observed effect after refresh")
                     return f"Clicked at ({x}, {y}) (CGEventPostToPid, refreshed window)"
                 except InputError as retry_exc:
                     logger.debug(
@@ -1333,17 +2657,17 @@ class SessionManager:
                         retry_exc,
                     )
 
-            sx, sy = self._to_screen_coords(session, t.window_id, float(x), float(y))
-            hit_ref = accessibility.element_at_position(t.ax_app, sx, sy)
-            if hit_ref is not None:
-                try:
-                    if button == "right":
-                        accessibility.perform_action_on_ref(hit_ref, "AXShowMenu")
-                        return f"Right-clicked at ({x}, {y}) (AX hit-test)"
-                    accessibility.perform_action_on_ref(hit_ref, "AXPress")
-                    return f"Clicked at ({x}, {y}) (AX hit-test)"
-                except Exception:
-                    logger.debug("AX hit-test action failed at (%s, %s)", x, y)
+            ax_result = self._try_ax_hit_test_click_at_point(
+                session,
+                sx,
+                sy,
+                display_x=float(x),
+                display_y=float(y),
+                button=button,
+                count=count,
+            )
+            if ax_result is not None:
+                return ax_result
 
             raise AutomationError(
                 f"Click failed at ({x}, {y}). "
@@ -1366,12 +2690,33 @@ class SessionManager:
 
         if el_idx is not None:
             node = self._resolve_index(session, int(el_idx))
+            before_text = None
+            if node.ax_role in ("AXTextField", "AXTextArea") and node.ax_ref is not None:
+                try:
+                    before_text = EditableTextObject(node.ax_ref, pid=node.element_pid).text
+                except Exception:
+                    before_text = None
 
             # Try EditableTextObject.insert_text for text elements
             if node.ax_role in ("AXTextField", "AXTextArea"):
                 try:
+                    mark = session.ax_outcome_monitor.mark() if session.ax_outcome_monitor is not None else None
                     eto = EditableTextObject(node.ax_ref, pid=node.element_pid)
                     eto.insert_text(text)
+                    verification = self._verify_ax_contract(
+                        session,
+                        contract=VerificationContract(
+                            direct_verifier=lambda: text in EditableTextObject(
+                                node.ax_ref, pid=node.element_pid
+                            ).text
+                        ),
+                        mark=mark,
+                    )
+                    if verification not in {
+                        ActionVerificationResult.CONFIRMED,
+                        ActionVerificationResult.TRANSIENT_OPENED,
+                    }:
+                        raise AutomationError("EditableTextObject.insertText had no observed effect")
                     return f"Typed {text!r} into element {el_idx} (EditableTextObject.insertText)"
                 except Exception as e:
                     logger.debug("EditableTextObject.insertText failed for element %d: %s", el_idx, e)
@@ -1382,9 +2727,37 @@ class SessionManager:
                     f"Try set_value instead."
                 )
 
-        # Ensure target window is key within its PID before keyboard CGEvent
-        self._ensure_target_window_focus(session)
-        cg_input.type_text(t.window_pid, text)
+        input_pid = self._background_pid_for_node(session, node if el_idx is not None else None)
+        transport_mark = 0
+        if session.cgevent_outcome_monitor is not None:
+            _, transport_mark = session.cgevent_outcome_monitor.begin_action()
+        notification_mark = (
+            session.ax_outcome_monitor.mark()
+            if session.ax_outcome_monitor is not None
+            else None
+        )
+        cg_input.type_text(input_pid, text)
+        if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
+            direct_verifier = None
+            if el_idx is not None and node.ax_ref is not None:
+                def _verifier() -> bool:
+                    current = EditableTextObject(node.ax_ref, pid=node.element_pid).text
+                    if before_text is None:
+                        return text in current
+                    return current != before_text
+                direct_verifier = _verifier
+            verification = self._verify_cgevent_contract(
+                session,
+                expectation=expectation_for_typing(),
+                transport_mark=transport_mark,
+                contract=VerificationContract(direct_verifier=direct_verifier),
+                notification_mark=notification_mark,
+            )
+            if verification not in {
+                ActionVerificationResult.CONFIRMED,
+                ActionVerificationResult.TRANSIENT_OPENED,
+            }:
+                raise AutomationError("type_text had no observed effect")
         if el_idx is None:
             return f"Typed {text!r} into the current focused element"
         return f"Typed {text!r} into element {el_idx} (background key events)"
@@ -1401,19 +2774,63 @@ class SessionManager:
         # --- EditableTextObject for text elements ---
         if node.ax_role in ("AXTextField", "AXTextArea"):
             try:
+                mark = session.ax_outcome_monitor.mark() if session.ax_outcome_monitor is not None else None
                 eto = EditableTextObject(node.ax_ref, pid=node.element_pid)
                 if insert_mode:
                     eto.insert_text(value)
+                    verification = self._verify_ax_contract(
+                        session,
+                        contract=VerificationContract(
+                            direct_verifier=lambda: value in EditableTextObject(
+                                node.ax_ref, pid=node.element_pid
+                            ).text
+                        ),
+                        mark=mark,
+                    )
+                    if verification not in {
+                        ActionVerificationResult.CONFIRMED,
+                        ActionVerificationResult.TRANSIENT_OPENED,
+                    }:
+                        raise AutomationError("EditableTextObject.insertText had no observed effect")
                     return f"Inserted text into element {idx} (EditableTextObject.insertText)"
                 else:
                     eto.set_text(value)
+                    verification = self._verify_ax_contract(
+                        session,
+                        contract=VerificationContract(
+                            direct_verifier=lambda: EditableTextObject(
+                                node.ax_ref, pid=node.element_pid
+                            ).text == value
+                        ),
+                        mark=mark,
+                    )
+                    if verification not in {
+                        ActionVerificationResult.CONFIRMED,
+                        ActionVerificationResult.TRANSIENT_OPENED,
+                    }:
+                        raise AutomationError("EditableTextObject.setText had no observed effect")
                     return f"Set value of element {idx} to {value!r} (EditableTextObject.setText)"
             except Exception as e:
                 logger.debug("EditableTextObject failed for element %d: %s", idx, e)
 
         # --- Primary: Direct AX attribute set ---
         try:
+            mark = session.ax_outcome_monitor.mark() if session.ax_outcome_monitor is not None else None
             accessibility.set_attribute(node, "AXValue", value)
+            verification = self._verify_ax_contract(
+                session,
+                contract=VerificationContract(
+                    direct_verifier=lambda: EditableTextObject(node.ax_ref, pid=node.element_pid).text == value
+                    if node.ax_ref is not None
+                    else False
+                ),
+                mark=mark,
+            )
+            if verification not in {
+                ActionVerificationResult.CONFIRMED,
+                ActionVerificationResult.TRANSIENT_OPENED,
+            }:
+                raise AutomationError("AXValue set had no observed effect")
             return f"Set value of element {idx} to {value!r} (AXValue)"
         except Exception as e:
             logger.debug("AXValue set failed for element %d: %s", idx, e)
@@ -1422,7 +2839,22 @@ class SessionManager:
         try:
             if self._background_click_node(session, node):
                 time.sleep(0.05)
+                mark = session.ax_outcome_monitor.mark() if session.ax_outcome_monitor is not None else None
                 accessibility.set_attribute(node, "AXValue", value)
+                verification = self._verify_ax_contract(
+                    session,
+                    contract=VerificationContract(
+                        direct_verifier=lambda: EditableTextObject(node.ax_ref, pid=node.element_pid).text == value
+                        if node.ax_ref is not None
+                        else False
+                    ),
+                    mark=mark,
+                )
+                if verification not in {
+                    ActionVerificationResult.CONFIRMED,
+                    ActionVerificationResult.TRANSIENT_OPENED,
+                }:
+                    raise AutomationError("Focus + AXValue had no observed effect")
                 return f"Set value of element {idx} to {value!r} (focus + AXValue)"
         except Exception as e:
             logger.debug("Focus + AXValue retry failed for element %d: %s", idx, e)
@@ -1445,7 +2877,24 @@ class SessionManager:
             ax_key_action = _KEY_TO_AX_ACTION.get(key.lower())
             if ax_key_action:
                 try:
+                    mark = session.ax_outcome_monitor.mark() if session.ax_outcome_monitor is not None else None
                     accessibility.perform_action(node, ax_key_action)
+                    verification = self._verify_ax_contract(
+                        session,
+                        contract=VerificationContract(
+                            expect_transient_close=(
+                                key.lower() == "escape"
+                                and session.transient_graph_tracker is not None
+                                and session.transient_graph_tracker.has_active_transient
+                            )
+                        ),
+                        mark=mark,
+                    )
+                    if verification not in {
+                        ActionVerificationResult.CONFIRMED,
+                        ActionVerificationResult.TRANSIENT_CLOSED,
+                    }:
+                        raise AutomationError(f"{ax_key_action} had no observed effect")
                     return f"Pressed {key} on element {el_idx} ({ax_key_action})"
                 except Exception:
                     logger.debug("%s failed for element %s", ax_key_action, el_idx)
@@ -1455,9 +2904,35 @@ class SessionManager:
                     f"Cannot target element {el_idx} for key input without activating the app."
                 )
 
-        # Ensure target window is key within its PID before keyboard CGEvent
-        self._ensure_target_window_focus(session)
-        cg_input.press_key(t.window_pid, key)
+        input_pid = self._background_pid_for_node(session, node if el_idx is not None else None)
+        transport_mark = 0
+        if session.cgevent_outcome_monitor is not None:
+            _, transport_mark = session.cgevent_outcome_monitor.begin_action()
+        notification_mark = (
+            session.ax_outcome_monitor.mark()
+            if session.ax_outcome_monitor is not None
+            else None
+        )
+        cg_input.press_key(input_pid, key)
+        if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
+            verification = self._verify_cgevent_contract(
+                session,
+                expectation=expectation_for_keypress(),
+                transport_mark=transport_mark,
+                contract=VerificationContract(
+                    expect_transient_close=(
+                        key.lower() == "escape"
+                        and session.transient_graph_tracker is not None
+                        and session.transient_graph_tracker.has_active_transient
+                    )
+                ),
+                notification_mark=notification_mark,
+            )
+            if verification not in {
+                ActionVerificationResult.CONFIRMED,
+                ActionVerificationResult.TRANSIENT_CLOSED,
+            }:
+                raise AutomationError("press_key had no observed effect")
         if el_idx is None:
             return f"Pressed {key} in {t.bundle_id} (background key event)"
         return f"Pressed {key} on element {el_idx} (background key event)"
@@ -1471,6 +2946,14 @@ class SessionManager:
         to_y = float(params["to_y"])
 
         try:
+            transport_mark = 0
+            if session.cgevent_outcome_monitor is not None:
+                _, transport_mark = session.cgevent_outcome_monitor.begin_action()
+            notification_mark = (
+                session.ax_outcome_monitor.mark()
+                if session.ax_outcome_monitor is not None
+                else None
+            )
             cg_input.drag(
                 t.window_pid,
                 t.window_id,
@@ -1480,10 +2963,31 @@ class SessionManager:
                 to_y,
                 screenshot_size=session.screenshot_size,
             )
+            if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
+                verification = self._verify_cgevent_contract(
+                    session,
+                    expectation=expectation_for_drag(),
+                    transport_mark=transport_mark,
+                    contract=VerificationContract(),
+                    notification_mark=notification_mark,
+                )
+                if verification not in {
+                    ActionVerificationResult.CONFIRMED,
+                    ActionVerificationResult.TRANSIENT_OPENED,
+                }:
+                    raise InputError("drag had no observed effect")
         except InputError as exc:
             logger.debug("Drag failed for %s window %s: %s", t.bundle_id, t.window_id, exc)
             self._refresh_window(session)
             t = session.target
+            transport_mark = 0
+            if session.cgevent_outcome_monitor is not None:
+                _, transport_mark = session.cgevent_outcome_monitor.begin_action()
+            notification_mark = (
+                session.ax_outcome_monitor.mark()
+                if session.ax_outcome_monitor is not None
+                else None
+            )
             cg_input.drag(
                 t.window_pid,
                 t.window_id,
@@ -1493,6 +2997,19 @@ class SessionManager:
                 to_y,
                 screenshot_size=session.screenshot_size,
             )
+            if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
+                verification = self._verify_cgevent_contract(
+                    session,
+                    expectation=expectation_for_drag(),
+                    transport_mark=transport_mark,
+                    contract=VerificationContract(),
+                    notification_mark=notification_mark,
+                )
+                if verification not in {
+                    ActionVerificationResult.CONFIRMED,
+                    ActionVerificationResult.TRANSIENT_OPENED,
+                }:
+                    raise AutomationError("drag had no observed effect after refresh")
 
         return f"Dragged from ({from_x}, {from_y}) to ({to_x}, {to_y})"
 
@@ -1501,19 +3018,86 @@ class SessionManager:
         idx = int(params["element_index"])
         node = self._resolve_index(session, idx)
         action = params["action"]
+        active_graph = self._active_graph(session)
+        source_graph_kind = active_graph.kind if active_graph is not None else GraphKind.PERSISTENT
+
+        expect_transient_open = action in {"AXShowMenu", "AXShowDefaultUI", "AXShowAlternateUI"} or (
+            action in {"AXPress", "AXPick"} and node.ax_role in {"AXMenuBarItem", "AXMenuButton", "AXPopUpButton"}
+        )
+        expect_transient_close = action in {"AXPick", "AXCancel"} and bool(
+            session.transient_graph_tracker is not None and session.transient_graph_tracker.has_active_transient
+        )
+        direct_verifier = None
+        if action == "AXScrollToVisible":
+            direct_verifier = lambda: self._node_is_visible_in_window(
+                session,
+                self._refresh_live_node_from_ref(node),
+            )
+        contract = VerificationContract(
+            expect_transient_open=expect_transient_open,
+            expect_transient_close=expect_transient_close,
+            allow_focus_change=action != "AXScrollToVisible",
+            allow_value_change=action != "AXScrollToVisible",
+            direct_verifier=direct_verifier,
+        )
 
         # --- Primary: Direct AX action ---
         try:
+            mark = session.ax_outcome_monitor.mark() if session.ax_outcome_monitor is not None else None
             accessibility.perform_action(node, action)
-            return f"Performed {action!r} on element {idx}"
+            transient_source = None
+            if expect_transient_open:
+                transient_source = self._make_transient_source(
+                    session,
+                    node,
+                    action_name=action,
+                    reopen_fn=lambda resolved: _safe_perform_action(resolved, action),
+                    graph_kind=source_graph_kind,
+                )
+            verification = self._verify_ax_contract(
+                session,
+                contract=contract,
+                mark=mark,
+                transient_source=transient_source,
+            )
+            if verification in {
+                ActionVerificationResult.CONFIRMED,
+                ActionVerificationResult.TRANSIENT_OPENED,
+                ActionVerificationResult.TRANSIENT_CLOSED,
+            }:
+                return f"Performed {action!r} on element {idx}"
         except Exception as e:
             logger.debug("Action %s failed for element %d: %s", action, idx, e)
 
         # --- AXPress as generic fallback ---
-        if action not in ("AXPress", "AXCancel"):
+        if action not in ("AXPress", "AXCancel") and action not in _STRICT_SECONDARY_ACTIONS:
             try:
+                mark = session.ax_outcome_monitor.mark() if session.ax_outcome_monitor is not None else None
                 accessibility.perform_action(node, "AXPress")
-                return f"Performed AXPress on element {idx} (fallback for {action!r})"
+                transient_source = None
+                if node.ax_role in {"AXMenuBarItem", "AXMenuButton", "AXPopUpButton"}:
+                    transient_source = self._make_transient_source(
+                        session,
+                        node,
+                        action_name="AXPress",
+                        reopen_fn=lambda resolved: _safe_perform_action(resolved, "AXPress"),
+                        graph_kind=source_graph_kind,
+                    )
+                verification = self._verify_ax_contract(
+                    session,
+                    contract=VerificationContract(
+                        expect_transient_open=transient_source is not None,
+                        expect_transient_close=expect_transient_close,
+                    ),
+                    mark=mark,
+                    transient_source=transient_source,
+                )
+                if verification in {
+                    ActionVerificationResult.CONFIRMED,
+                    ActionVerificationResult.TRANSIENT_OPENED,
+                    ActionVerificationResult.TRANSIENT_CLOSED,
+                }:
+                    return f"Performed AXPress on element {idx} (fallback for {action!r})"
             except Exception:
                 logger.debug("AXPress fallback failed for element %d", idx)
 
@@ -1523,13 +3107,7 @@ class SessionManager:
         )
 
     def _handle_scroll(self, session: AppSession, params: dict) -> str:
-        """Scroll with verified fallback chain.
-
-        Tries truly-background methods first (AX actions, CGEventPostToPid),
-        verifies they worked by checking element positions before/after,
-        falls back to CGEventPost+CGWarp if background methods fail.
-        Caches the working method per session to skip failed tiers.
-        """
+        """Scroll using background-only methods with per-session method caching."""
         direction = params["direction"]
         pages = int(params.get("pages", 1))
         if pages < 1:
@@ -1545,10 +3123,8 @@ class SessionManager:
 
         if element_index is not None:
             idx = int(element_index)
-            node = self._resolve_index(session, idx)
-            center = accessibility.get_element_position(node)
-            if center is not None and center[0] is not None:
-                scroll_point = (center[0], center[1])
+            node = self._resolve_scroll_node(session, self._resolve_index(session, idx))
+            scroll_point = self._scroll_point_for_node(node)
         elif x is not None and y is not None:
             sx, sy = cg_input.window_to_screen_coords(
                 session.target.window_id, float(x), float(y),
@@ -1561,55 +3137,31 @@ class SessionManager:
                 "scroll requires either element_index or x/y coordinates"
             )
 
+        prefer_ax = (
+            session.input_strategy.should_use_ax_action(
+                "scroll",
+                is_web_area=bool(node and node.is_web_area),
+            )
+            if session.input_strategy is not None
+            else True
+        )
+        ordered_methods = self._scroll_method_order(prefer_ax)
+
         for _ in range(pages):
-            performed = False
             cached = session.scroll_method
+            if cached is not None:
+                if self._try_scroll_method(session, node, scroll_point, direction, cached):
+                    continue
+                session.scroll_method = None
 
-            # If we already know what works, use it directly
-            if cached == "ax" and node is not None:
-                performed = self._try_ax_scroll(session, node, direction)
-            elif cached == "pid" and scroll_point is not None:
-                performed = self._try_pid_scroll(session, scroll_point, direction)
-            elif cached == "system" and scroll_point is not None:
-                performed = self._try_system_scroll(scroll_point, direction)
-
+            performed = False
+            for method in ordered_methods:
+                if self._try_scroll_method(session, node, scroll_point, direction, method):
+                    session.scroll_method = method
+                    performed = True
+                    break
             if performed:
                 continue
-
-            # No cache hit — discover which method works with verification
-
-            # Tier 1: AX scroll (truly background, no cursor movement)
-            if node is not None:
-                before = self._get_scroll_witness(session, node)
-                if self._try_ax_scroll(session, node, direction):
-                    time.sleep(0.05)
-                    if self._scroll_changed(session, node, before):
-                        session.scroll_method = "ax"
-                        logger.debug("Scroll method: ax (verified)")
-                        continue
-
-            # Tier 2: CGEventPostToPid (truly background)
-            if scroll_point is not None:
-                before = self._get_scroll_witness(session, node) if node else None
-                if self._try_pid_scroll(session, scroll_point, direction):
-                    time.sleep(0.05)
-                    if before is not None and self._scroll_changed(session, node, before):
-                        session.scroll_method = "pid"
-                        logger.debug("Scroll method: pid (verified)")
-                        continue
-
-            # Tier 3: CGEventPost + CGWarp (brief cursor teleport, always works)
-            if scroll_point is not None:
-                if self._try_system_scroll(scroll_point, direction):
-                    session.scroll_method = "system"
-                    logger.debug("Scroll method: system")
-                    continue
-
-            # Tier 4: Scrollbar value manipulation
-            if node is not None:
-                if self._try_scrollbar_fallback(node, direction):
-                    continue
-
             raise AutomationError("No scroll action was performed")
 
         target_desc = f"element {idx}" if idx is not None else f"({x}, {y})"
@@ -1629,6 +3181,66 @@ class SessionManager:
             y,
             session.screenshot_size,
         )
+
+    def _node_supports_scroll(self, node: Node) -> bool:
+        if node.role in _SCROLLABLE_DISPLAY_ROLES:
+            return True
+        if any(action in _DIRECTIONAL_SCROLL_ACTIONS for action in node.secondary_actions):
+            return True
+        return node.ax_ref is not None and accessibility.has_scrollbar_ref(node.ax_ref)
+
+    def _iter_live_scroll_ancestors(self, node: Node):
+        current = node.ax_ref
+        depth = node.depth
+        for _ in range(12):
+            if current is None:
+                break
+            parent = accessibility.get_parent_ref(current)
+            if parent is None:
+                break
+            depth = max(0, depth - 1)
+            current = parent
+            yield accessibility.node_from_ref(parent, depth=depth)
+
+    def _resolve_scroll_node(self, session: AppSession, node: Node) -> Node:
+        if self._node_supports_scroll(node):
+            return node
+        for ancestor in self._iter_live_scroll_ancestors(node):
+            if self._node_supports_scroll(ancestor):
+                return ancestor
+        for ancestor in self._iter_node_ancestors(session, node) or []:
+            if self._node_supports_scroll(ancestor):
+                return ancestor
+        return node
+
+    def _scroll_point_for_node(self, node: Node) -> tuple[float, float] | None:
+        frame = accessibility.get_element_frame(node)
+        if frame is None:
+            return None
+        return (frame[0] + frame[2] / 2, frame[1] + frame[3] / 2)
+
+    def _scroll_method_order(self, prefer_ax: bool) -> list[str]:
+        if prefer_ax:
+            return ["scrollbar", "ax", "pixel", "pid"]
+        return ["pixel", "pid", "ax", "scrollbar"]
+
+    def _try_scroll_method(
+        self,
+        session: AppSession,
+        node: Node | None,
+        point: tuple[float, float] | None,
+        direction: str,
+        method: str,
+    ) -> bool:
+        if method == "ax" and node is not None:
+            return self._try_ax_scroll(session, node, direction)
+        if method == "scrollbar" and node is not None:
+            return self._try_scrollbar_fallback(node, direction)
+        if method == "pixel" and point is not None:
+            return self._try_pid_pixel_scroll(session, node, point, direction)
+        if method == "pid" and point is not None:
+            return self._try_pid_scroll(session, node, point, direction)
+        return False
 
     def _try_scrollbar_fallback(self, node: Node, direction: str) -> bool:
         """Step 4: Try setting scrollbar value directly."""
@@ -1672,36 +3284,37 @@ class SessionManager:
             f"AXScroll{direction_title}",
         ]
 
-        # Collect candidate elements: target + ancestors up to scroll area
         candidates = [node]
-        if session.tree_nodes and node.index is not None:
-            ancestor_depth = node.depth
-            for prev_idx in range(node.index - 1, -1, -1):
-                prev = session.tree_nodes[prev_idx]
-                if prev.depth >= ancestor_depth:
-                    continue
-                candidates.append(prev)
-                ancestor_depth = prev.depth
-                if prev.ax_role in ("AXScrollArea", "AXWebArea"):
-                    break
+        candidates.extend(self._iter_live_scroll_ancestors(node))
+        candidates.extend(self._iter_node_ancestors(session, node) or [])
+        before = self._get_scroll_witness(session, node)
 
         for candidate in candidates:
+            action_names = (
+                accessibility.get_action_names_for_ref(candidate.ax_ref)
+                if candidate.ax_ref is not None
+                else candidate.secondary_actions
+            )
             # Try page-level actions (only if listed)
             for action in ax_page_actions:
-                if action in candidate.secondary_actions:
+                if action in action_names:
                     try:
+                        mark = session.ax_outcome_monitor.mark() if session.ax_outcome_monitor is not None else None
                         accessibility.perform_action(candidate, action)
-                        return True
+                        verification = self._verify_ax_contract(
+                            session,
+                            contract=VerificationContract(
+                                direct_verifier=lambda: self._scroll_changed(session, node, before)
+                            ),
+                            mark=mark,
+                        )
+                        if verification in {
+                            ActionVerificationResult.CONFIRMED,
+                            ActionVerificationResult.TRANSIENT_OPENED,
+                        }:
+                            return True
                     except Exception as e:
                         logger.debug("AX scroll %s on %s failed: %s", action, candidate.ax_role, e)
-
-            # Try generic scroll-to actions
-            for action in ("AXScrollToVisible", "AXScrollToShowDescendant"):
-                try:
-                    accessibility.perform_action(candidate, action)
-                    return True
-                except Exception:
-                    continue
 
         return False
 
@@ -1732,40 +3345,109 @@ class SessionManager:
             return False
         return abs(after[0] - before[0]) > 1 or abs(after[1] - before[1]) > 1
 
+    def _try_pid_pixel_scroll(
+        self,
+        session: AppSession,
+        node: Node | None,
+        point: tuple[float, float],
+        direction: str,
+    ) -> bool:
+        try:
+            before = self._get_scroll_witness(session, node)
+            bounds = screenshot.get_window_bounds(session.target.window_id)
+            is_vertical = direction in ("up", "down")
+            span = bounds[3] if bounds is not None and is_vertical else bounds[2] if bounds is not None else 0
+            pixels = max(SCROLL_PIXELS_MIN, int(span * SCROLL_PIXELS_PER_PAGE_RATIO))
+            transport_mark = 0
+            if session.cgevent_outcome_monitor is not None:
+                _, transport_mark = session.cgevent_outcome_monitor.begin_action()
+            notification_mark = (
+                session.ax_outcome_monitor.mark()
+                if session.ax_outcome_monitor is not None
+                else None
+            )
+            cg_input.scroll_pid_pixel(
+                self._background_pid_for_node(session, node),
+                point[0],
+                point[1],
+                direction,
+                pixels,
+                window_id=session.target.window_id,
+            )
+            if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
+                verification = self._verify_cgevent_contract(
+                    session,
+                    expectation=expectation_for_scroll(),
+                    transport_mark=transport_mark,
+                    contract=VerificationContract(
+                        direct_verifier=lambda: self._scroll_changed(session, node, before)
+                    ),
+                    notification_mark=notification_mark,
+                )
+                return verification in {
+                    ActionVerificationResult.CONFIRMED,
+                    ActionVerificationResult.TRANSIENT_OPENED,
+                }
+            return True
+        except Exception as e:
+            logger.debug("CGEventPostToPid pixel scroll failed: %s", e)
+            return False
+
     def _try_pid_scroll(
-        self, session: AppSession, point: tuple[float, float], direction: str,
+        self,
+        session: AppSession,
+        node: Node | None,
+        point: tuple[float, float],
+        direction: str,
     ) -> bool:
         """Scroll via CGEventPostToPid — truly background, no cursor movement."""
         try:
+            before = self._get_scroll_witness(session, node)
+            transport_mark = 0
+            if session.cgevent_outcome_monitor is not None:
+                _, transport_mark = session.cgevent_outcome_monitor.begin_action()
+            notification_mark = (
+                session.ax_outcome_monitor.mark()
+                if session.ax_outcome_monitor is not None
+                else None
+            )
             cg_input.scroll_pid(
-                session.target.window_pid,
+                self._background_pid_for_node(session, node),
                 point[0],
                 point[1],
                 direction,
                 clicks=SCROLL_CLICKS_PER_PAGE,
+                window_id=session.target.window_id,
             )
+            if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
+                verification = self._verify_cgevent_contract(
+                    session,
+                    expectation=expectation_for_scroll(),
+                    transport_mark=transport_mark,
+                    contract=VerificationContract(
+                        direct_verifier=lambda: self._scroll_changed(session, node, before)
+                    ),
+                    notification_mark=notification_mark,
+                )
+                return verification in {
+                    ActionVerificationResult.CONFIRMED,
+                    ActionVerificationResult.TRANSIENT_OPENED,
+                }
             return True
         except Exception as e:
             logger.debug("CGEventPostToPid scroll failed: %s", e)
             return False
 
-    def _try_system_scroll(
-        self, point: tuple[float, float], direction: str,
-    ) -> bool:
-        """Scroll via CGEventPost + CGWarp — brief cursor teleport."""
-        try:
-            cg_input.scroll_system(
-                point[0],
-                point[1],
-                direction,
-                clicks=SCROLL_CLICKS_PER_PAGE,
-            )
-            return True
-        except Exception as e:
-            logger.debug("CGEvent system scroll failed: %s", e)
-            return False
-
     def _resolve_index(self, session: AppSession, idx: int) -> Node:
+        if feature_flags.transient_graphs:
+            active_graph = self._active_graph(session)
+            if (
+                active_graph is not None
+                and active_graph.kind == GraphKind.TRANSIENT
+                and session.transient_graph_tracker is not None
+                and not session.transient_graph_tracker.is_root_live(active_graph.root_ref)
+            ):
+                active_graph.state = GraphState.CLOSED
         # Use RefetchableTree for element resolution with refetch support
         if session.refetchable_tree is not None:
             result = session.refetchable_tree.element(idx)

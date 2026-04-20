@@ -34,6 +34,11 @@ class Node:
     ax_id: str | None
     secondary_actions: list[str]
     depth: int
+    placeholder: str | None = None
+    help_text: str | None = None
+    value_description: str | None = None
+    position: Point | None = None
+    size: Size | None = None
     ax_ref: Any = field(repr=False, default=None)
     # DisplayElement fields
     lm_role: str | None = None
@@ -43,12 +48,18 @@ class Node:
     is_oop: bool = False
     # Original AX role for pruning decisions
     ax_role: str | None = None
+    subrole: str | None = None
     # PID of the element's process (for OOP detection)
     element_pid: int | None = None
     # Rich text / web content
     web_content: str | None = None  # Extracted web area or text area content
     web_area_url: str | None = None  # URL of web area element
     url: str | None = None  # URL for link elements (AXLink AXURL attribute)
+    # Internal graph metadata for stale-node recovery. These fields are
+    # intentionally not serialized into model-facing tree text.
+    graph_id: str | None = field(default=None, repr=False)
+    graph_generation: int = field(default=0, repr=False)
+    graph_locator: Any = field(default=None, repr=False)
 
 
 @dataclass

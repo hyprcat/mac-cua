@@ -27,12 +27,17 @@ class FeatureFlags:
     always_simulate_click: bool = False
     screenshot_classifier: bool = False
     tree_pruning: bool = True
+    codex_tree_style: bool = True
     rich_text_markdown: bool = True
     web_content_extraction: bool = True
     user_interruption_detection: bool = True
     focus_enforcement: bool = True
     screen_capture_kit: bool = True
     menu_tracking: bool = True
+    transient_graphs: bool = True
+    ax_action_verification: bool = True
+    cgevent_action_verification: bool = True
+    transient_graph_debug: bool = False
     system_selection: bool = True
     pip_preview: bool = False
     personal_instructions_overrides_builtin: bool = False

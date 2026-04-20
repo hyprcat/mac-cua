@@ -14,6 +14,7 @@ from app._lib.errors import (
     StaleReferenceError,
     StepLimitError,
 )
+from app._lib.graphs import TransientSurface
 from app.response import Node, ToolResponse
 from app.session import AppSession, AppTarget, SessionManager
 
@@ -136,6 +137,103 @@ class TestPipelineStepOrdering(unittest.TestCase):
         # focus_deactivate happens after dispatch (in the return path)
         self.assertIn("focus_activate", order)
 
+    def test_open_menu_does_not_block_next_action(self) -> None:
+        manager = SessionManager()
+        session = _make_session()
+        session.tree_nodes = _make_nodes()
+        session.menu_tracker = MagicMock()
+        type(session.menu_tracker).menus_open = PropertyMock(return_value=True)
+
+        with (
+            patch.object(manager, "_resolve_session", return_value=session),
+            patch.object(manager, "_check_safety"),
+            patch.object(manager, "_check_approval"),
+            patch.object(manager._lifecycle, "track_app_used"),
+            patch.object(manager._lifecycle, "increment_step"),
+            patch.object(manager._lifecycle, "check_step_limit", return_value=False),
+            patch.object(manager, "_activate_focus_enforcement"),
+            patch.object(manager, "_deactivate_focus_enforcement"),
+            patch.object(manager, "_dispatch", return_value="ok") as dispatch_mock,
+            patch.object(manager._user_interaction_monitor, "start_monitoring"),
+            patch.object(manager._user_interaction_monitor, "check_interruption", return_value=None),
+            patch.object(manager._user_interaction_monitor, "stop_monitoring"),
+            patch.object(manager, "take_snapshot", return_value=_stub_snapshot(session)),
+            patch.object(manager, "_ensure_trackers_started"),
+            patch("app.session.analytics"),
+        ):
+            manager.execute("click", {"window_id": 77, "element_index": "0"})
+
+        dispatch_mock.assert_called_once()
+        session.menu_tracker.wait_for_menu_close.assert_not_called()
+
+    def test_open_menu_skips_settle_wait(self) -> None:
+        manager = SessionManager()
+        session = _make_session()
+        session.tree_nodes = _make_nodes()
+        session.menu_tracker = MagicMock()
+        type(session.menu_tracker).menus_open = PropertyMock(return_value=True)
+
+        with (
+            patch.object(manager, "_resolve_session", return_value=session),
+            patch.object(manager, "_check_safety"),
+            patch.object(manager, "_check_approval"),
+            patch.object(manager._lifecycle, "track_app_used"),
+            patch.object(manager._lifecycle, "increment_step"),
+            patch.object(manager._lifecycle, "check_step_limit", return_value=False),
+            patch.object(manager, "_activate_focus_enforcement"),
+            patch.object(manager, "_deactivate_focus_enforcement"),
+            patch.object(manager, "_dispatch", return_value="ok"),
+            patch("app.session.wait_for_settle") as settle_mock,
+            patch.object(manager._user_interaction_monitor, "start_monitoring"),
+            patch.object(manager._user_interaction_monitor, "check_interruption", return_value=None),
+            patch.object(manager._user_interaction_monitor, "stop_monitoring"),
+            patch.object(manager, "take_snapshot", return_value=_stub_snapshot(session)),
+            patch.object(manager, "_ensure_trackers_started"),
+            patch("app.session.analytics"),
+        ):
+            manager.execute("click", {"window_id": 77, "element_index": "0"})
+
+        settle_mock.assert_not_called()
+
+    def test_transient_probe_captures_snapshot_immediately_without_settle(self) -> None:
+        manager = SessionManager()
+        session = _make_session()
+        session.tree_nodes = _make_nodes()
+        session.transient_graph_tracker = MagicMock()
+        type(session.transient_graph_tracker).has_active_transient = PropertyMock(return_value=True)
+        type(session.transient_graph_tracker).active_surface = PropertyMock(
+            return_value=TransientSurface(root_ref=object(), locator=None, kind="menu")
+        )
+
+        snapshot = _stub_snapshot(session)
+        snapshot.snapshot_id = 2
+
+        with (
+            patch.object(manager, "_resolve_session", return_value=session),
+            patch.object(manager, "_check_safety"),
+            patch.object(manager, "_check_approval"),
+            patch.object(manager._lifecycle, "track_app_used"),
+            patch.object(manager._lifecycle, "increment_step"),
+            patch.object(manager._lifecycle, "check_step_limit", return_value=False),
+            patch.object(manager, "_activate_focus_enforcement"),
+            patch.object(manager, "_deactivate_focus_enforcement"),
+            patch.object(manager, "_dispatch", return_value="ok"),
+            patch("app.session.wait_for_settle") as settle_mock,
+            patch.object(manager._user_interaction_monitor, "start_monitoring"),
+            patch.object(manager._user_interaction_monitor, "check_interruption", return_value=None),
+            patch.object(manager._user_interaction_monitor, "stop_monitoring"),
+            patch.object(manager, "take_snapshot", return_value=snapshot) as snapshot_mock,
+            patch.object(manager, "_ensure_trackers_started"),
+            patch.object(manager, "_restore_previous_frontmost_app"),
+            patch("app.session.analytics"),
+        ):
+            response = manager.execute("click", {"window_id": 77, "element_index": "0"})
+
+        settle_mock.assert_not_called()
+        snapshot_mock.assert_called_once_with(session, skip_refresh=True)
+        self.assertEqual(response.snapshot_id, 2)
+        self.assertEqual(response.result, "ok")
+
 
 class TestPipelineErrorPaths(unittest.TestCase):
     """Verify error handling at each pipeline stage."""
@@ -227,7 +325,8 @@ class TestPipelineErrorPaths(unittest.TestCase):
         ):
             manager.execute("click", {"window_id": 77, "element_index": "0"})
 
-        cleanup_mock.assert_called_once_with(session)
+        cleanup_mock.assert_called_once()
+        self.assertIs(cleanup_mock.call_args.args[0], session)
 
     def test_list_apps_bypasses_pipeline(self) -> None:
         """list_apps returns immediately without resolving a session."""
@@ -242,9 +341,9 @@ class TestPipelineErrorPaths(unittest.TestCase):
 
 
 class TestPipelineUserInterruption(unittest.TestCase):
-    """Verify user interruption detection attaches warning."""
+    """Verify user interruption detection hard-stops further actions."""
 
-    def test_interruption_warning_attached_to_response(self) -> None:
+    def test_interruption_returns_error_without_snapshot(self) -> None:
         manager = SessionManager()
         session = _make_session()
         session.tree_nodes = _make_nodes()
@@ -265,15 +364,20 @@ class TestPipelineUserInterruption(unittest.TestCase):
             patch.object(
                 manager._user_interaction_monitor,
                 "check_interruption",
-                return_value="The user changed 'com.example.App'. Re-query the latest state.",
+                return_value="The user changed 'com.example.App'. Re-query the latest state with `get_app_state` before sending more actions.",
             ),
             patch.object(manager._user_interaction_monitor, "stop_monitoring"),
-            patch.object(manager, "take_snapshot", return_value=_stub_snapshot(session)),
+            patch.object(manager, "take_snapshot") as take_snapshot,
             patch("app.session.analytics"),
         ):
             response = manager.execute("click", {"window_id": 77, "element_index": "0"})
 
-        self.assertIn("user changed", response.result)
+        self.assertEqual(
+            response.error,
+            "The user changed 'com.example.App'. Re-query the latest state with `get_app_state` before sending more actions.",
+        )
+        self.assertTrue(session.user_state_invalidated)
+        take_snapshot.assert_not_called()
 
 
 class TestResponseFormat(unittest.TestCase):

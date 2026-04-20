@@ -423,15 +423,22 @@ def capture_window(window_id: int) -> Image.Image | None:
     return img
 
 
-def image_to_base64(image: Image.Image) -> str:
-    # Downscale large retina screenshots to reduce encoding time and payload size.
-    # Scaled screenshots — a 1920-wide image is plenty for the LLM.
+def prepare_image_for_transport(image: Image.Image) -> Image.Image:
+    """Resize a screenshot to the size that will be shown to the model."""
     max_width = 1920
-    if image.width > max_width:
-        ratio = max_width / image.width
-        new_size = (max_width, int(image.height * ratio))
-        image = image.resize(new_size, Image.LANCZOS)
+    width = getattr(image, "width", None)
+    height = getattr(image, "height", None)
+    if not isinstance(width, (int, float)) or not isinstance(height, (int, float)):
+        return image
+    if width <= max_width:
+        return image
 
+    ratio = max_width / width
+    new_size = (max_width, int(height * ratio))
+    return image.resize(new_size, Image.LANCZOS)
+
+
+def image_to_base64(image: Image.Image) -> str:
     buf = io.BytesIO()
     # PNG optimize=True is extremely slow on large images (10-30s+ for Retina).
     # Use unoptimized PNG which is fast (<100ms) with acceptable size.

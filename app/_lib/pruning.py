@@ -116,6 +116,19 @@ _TEXT_ONLY_ROLES: frozenset[str] = frozenset({
     "AXStaticText", "AXHeading",
 })
 
+_CODEX_SKIP_ROLES: frozenset[str] = frozenset({
+    "AXColumn",
+    "AXLayoutArea",
+    "AXLayoutItem",
+    "AXMatte",
+    "AXGrowArea",
+})
+
+_CODEX_EMPTY_WRAPPER_ROLES: frozenset[str] = frozenset({
+    "AXGroup",
+    "AXToolbar",
+})
+
 # Calendar app bundle IDs for prune_calendar_event_details
 _CALENDAR_BUNDLES: frozenset[str] = frozenset({
     "com.apple.iCal",
@@ -215,30 +228,30 @@ def _build_tree_index_excluding(
     nodes: list[Node],
     exclude: set[int],
 ) -> tuple[dict[int, list[int]], dict[int, int | None]]:
-    """Build tree index ignoring nodes in exclude set.
+    """Build tree index while reparenting around excluded wrapper nodes.
 
-    Excluded nodes are skipped entirely — their children are re-parented
-    to the nearest non-excluded ancestor.
+    The previous implementation rebuilt the tree from raw depths while skipping
+    excluded nodes. That breaks sibling relationships when a skipped wrapper
+    sits between two visible siblings at the same depth, because descendants of
+    the skipped wrapper can become children of the immediately previous visible
+    node. Instead, build the full parent chain first and then walk upward to
+    the nearest non-excluded ancestor for each kept node.
     """
+    full_children, full_parent = _build_tree_index(nodes)
+    del full_children  # parent chain is all we need below
+
     children: dict[int, list[int]] = {i: [] for i in range(len(nodes)) if i not in exclude}
     parent: dict[int, int | None] = {}
 
-    # Stack of (list_index, depth) — only non-excluded nodes
-    stack: list[tuple[int, int]] = []
-
-    for i, node in enumerate(nodes):
+    for i in range(len(nodes)):
         if i in exclude:
             continue
-        # Pop stack until we find the parent (depth < current)
-        while stack and stack[-1][1] >= node.depth:
-            stack.pop()
-        if stack:
-            parent_idx = stack[-1][0]
-            children[parent_idx].append(i)
-            parent[i] = parent_idx
-        else:
-            parent[i] = None
-        stack.append((i, node.depth))
+        ancestor = full_parent.get(i)
+        while ancestor is not None and ancestor in exclude:
+            ancestor = full_parent.get(ancestor)
+        parent[i] = ancestor
+        if ancestor is not None:
+            children[ancestor].append(i)
 
     return children, parent
 
@@ -323,6 +336,295 @@ def collapse_into_interactive_parent(
             node.label = " ".join(child_labels)
         for c in kids:
             remove.add(c)
+    return remove
+
+
+def collapse_row_children_into_row(
+    nodes: list[Node],
+    children_map: dict[int, list[int]],
+) -> set[int]:
+    """Lift leaf text/image content into sidebar-like rows only.
+
+    Codex-style trees keep list rows directly selectable and labeled, but they
+    still preserve nested text under richer cells and containers elsewhere. This
+    pass only collapses leaf text/image children under AXRow elements.
+    """
+    remove: set[int] = set()
+    for i, node in enumerate(nodes):
+        if node.ax_role != "AXRow":
+            continue
+
+        kids = children_map.get(i, [])
+        if not kids:
+            continue
+
+        child_texts: list[str] = []
+        child_descriptions: list[str] = []
+        row_child_indices: set[int] = set()
+
+        for child_idx in kids:
+            child = nodes[child_idx]
+            if children_map.get(child_idx):
+                continue
+            if child.ax_role in _TEXT_ONLY_ROLES:
+                text = child.label or child.value
+                if text:
+                    child_texts.append(text)
+                row_child_indices.add(child_idx)
+            elif child.ax_role == "AXImage":
+                text = child.description or child.label or child.value
+                if text:
+                    child_descriptions.append(text)
+                row_child_indices.add(child_idx)
+
+        if not row_child_indices:
+            continue
+
+        if child_descriptions and node.description is None and node.label is None:
+            if child_texts:
+                node.description = child_descriptions[0]
+            else:
+                node.label = child_descriptions[0]
+
+        if child_texts:
+            joined_text = " ".join(child_texts)
+            if node.label is None and node.description is None:
+                node.label = joined_text
+            elif node.value is None and joined_text != node.label:
+                node.value = joined_text
+
+        remove |= row_child_indices
+
+    return remove
+
+
+def flatten_outline_rows(
+    nodes: list[Node],
+    children_map: dict[int, list[int]],
+) -> set[int]:
+    """Collapse outline-row support content into the row itself.
+
+    Native sidebars often expose rows as AXRow -> AXCell -> image/text. Codex's
+    tree flattens those into direct row entries, while still keeping richer
+    tables and content collections nested. This pass only targets outline rows.
+    """
+    remove: set[int] = set()
+
+    def _leaf_descendants(idx: int) -> list[int]:
+        leaves: list[int] = []
+        for child_idx in children_map.get(idx, []):
+            grandchildren = children_map.get(child_idx, [])
+            if grandchildren:
+                leaves.extend(_leaf_descendants(child_idx))
+            else:
+                leaves.append(child_idx)
+        return leaves
+
+    for i, node in enumerate(nodes):
+        if node.ax_role != "AXRow" or node.subrole != "AXOutlineRow":
+            continue
+
+        descendants = _leaf_descendants(i)
+        if not descendants:
+            continue
+
+        text_values: list[str] = []
+        text_descriptions: list[str] = []
+        image_descriptions: list[str] = []
+        button_texts: list[str] = []
+        merged_actions = list(node.secondary_actions)
+        merged_states = list(node.states)
+        flattenable = True
+
+        def _merge_state(state: str) -> None:
+            if state not in merged_states:
+                merged_states.append(state)
+
+        def _merge_action(action: str) -> None:
+            if action not in merged_actions:
+                merged_actions.append(action)
+
+        for descendant_idx in descendants:
+            descendant = nodes[descendant_idx]
+            if descendant.ax_role == "AXStaticText":
+                text = descendant.label or descendant.value
+                if text:
+                    text_values.append(text)
+                description = descendant.description
+                if description and description != text:
+                    text_descriptions.append(description)
+                remove.add(descendant_idx)
+                continue
+            if descendant.ax_role == "AXImage":
+                description = descendant.description or descendant.label or descendant.value
+                if description:
+                    image_descriptions.append(description)
+                remove.add(descendant_idx)
+                continue
+            if descendant.ax_role == "AXDisclosureTriangle":
+                for state in descendant.states:
+                    if state in {"expanded", "selected", "selectable"}:
+                        _merge_state(state)
+                for action in descendant.secondary_actions:
+                    _merge_action(action)
+                remove.add(descendant_idx)
+                continue
+            if descendant.ax_role == "AXButton":
+                description = descendant.description or descendant.label or descendant.value
+                if description:
+                    button_texts.append(description)
+                for action in descendant.secondary_actions:
+                    _merge_action(action)
+                remove.add(descendant_idx)
+                continue
+            if descendant.ax_role == "AXCell":
+                remove.add(descendant_idx)
+                continue
+            flattenable = False
+            break
+
+        if not flattenable:
+            continue
+
+        main_text = " ".join(part for part in text_values if part).strip() or None
+        icon_description = next((part for part in image_descriptions if part), None)
+        button_text = next((part for part in button_texts if part), None)
+        text_description = next((part for part in text_descriptions if part), None)
+        existing_label = node.label
+        existing_description = node.description
+
+        if main_text is None and icon_description is None:
+            continue
+
+        node.secondary_actions = merged_actions
+        node.states = merged_states
+
+        if main_text and icon_description and icon_description != main_text:
+            if node.description is None:
+                node.description = icon_description
+            if node.value is None:
+                node.value = main_text
+            if node.label == main_text:
+                node.label = None
+        elif main_text and button_text and button_text != main_text:
+            if node.label is None:
+                node.label = button_text
+            elif node.label != button_text and node.description is None:
+                node.description = button_text
+            if node.value is None:
+                node.value = main_text
+        elif main_text:
+            if existing_label and existing_label != main_text and node.description is None:
+                node.description = existing_label
+                node.label = None
+            if existing_description and existing_description != main_text and node.description is None:
+                node.description = existing_description
+            if (
+                node.label is None
+                and node.description is None
+                and node.value is None
+                and ("expanded" in node.states or bool(node.secondary_actions))
+            ):
+                node.value = main_text
+            elif node.label is None and node.description is None and node.value is None:
+                node.label = main_text
+            elif node.value is None and node.label != main_text:
+                node.value = main_text
+
+        if text_description and node.description is None and text_description != node.label and text_description != node.value:
+            node.description = text_description
+
+        for child_idx in children_map.get(i, []):
+            child = nodes[child_idx]
+            if child.ax_role in {"AXCell", "AXImage", "AXStaticText", "AXButton", "AXDisclosureTriangle"}:
+                remove.add(child_idx)
+
+    return remove
+
+
+def collapse_button_title_children(
+    nodes: list[Node],
+    children_map: dict[int, list[int]],
+) -> set[int]:
+    """Collapse wrapper buttons that only host a title button and icon.
+
+    Native collection views sometimes expose each card as an outer button with
+    an icon child plus an inner title button. Keeping both bloats the index
+    space without improving grounding.
+    """
+    remove: set[int] = set()
+    for i, node in enumerate(nodes):
+        if node.ax_role != "AXButton":
+            continue
+        kids = [child_idx for child_idx in children_map.get(i, []) if child_idx not in remove]
+        if not kids:
+            continue
+        title_children = [child_idx for child_idx in kids if nodes[child_idx].ax_role == "AXButton"]
+        if len(title_children) != 1:
+            continue
+        title_idx = title_children[0]
+        title_node = nodes[title_idx]
+        if children_map.get(title_idx):
+            continue
+        if any(nodes[child_idx].ax_role not in {"AXButton", "AXImage"} for child_idx in kids):
+            continue
+        title_text = title_node.label or title_node.value or title_node.description
+        if not title_text:
+            continue
+        if node.label is None:
+            node.label = title_text
+        elif node.description is None and node.label != title_text:
+            node.description = title_text
+        if node.value is None and node.label != title_node.value and title_node.value not in {None, node.label}:
+            node.value = title_node.value
+        if node.description is None and title_node.description and title_node.description != node.label:
+            node.description = title_node.description
+        for child_idx in kids:
+            remove.add(child_idx)
+    return remove
+
+
+def drop_empty_outline_rows(
+    nodes: list[Node],
+    children_map: dict[int, list[int]],
+) -> set[int]:
+    """Remove outline rows that contain no human-usable content.
+
+    Some native sidebars expose decorative/icon-only rows as AXRow -> AXCell ->
+    empty hosting views. They add index noise without giving the model any
+    actionable grounding. After row flattening, drop outline rows whose subtree
+    still contains no label, description, value, actions, or meaningful
+    descendants.
+    """
+    remove: set[int] = set()
+
+    def _subtree_indices(idx: int) -> list[int]:
+        result = [idx]
+        for child_idx in children_map.get(idx, []):
+            result.extend(_subtree_indices(child_idx))
+        return result
+
+    for i, node in enumerate(nodes):
+        if node.ax_role != "AXRow" or node.subrole != "AXOutlineRow":
+            continue
+        if node.label or node.description or node.value or node.secondary_actions:
+            continue
+        descendants = _subtree_indices(i)[1:]
+        if not descendants:
+            remove.add(i)
+            continue
+        meaningful = False
+        for descendant_idx in descendants:
+            descendant = nodes[descendant_idx]
+            if descendant.label or descendant.description or descendant.value or descendant.secondary_actions:
+                meaningful = True
+                break
+            if descendant.ax_role not in {"AXCell", "AXGroup"}:
+                meaningful = True
+                break
+        if not meaningful:
+            remove.update([i, *descendants])
+
     return remove
 
 
@@ -582,6 +884,8 @@ def combine_text_siblings(
                     if child.label:
                         sep = "\n" if child.ax_role == "AXHeading" else " "
                         first.label = (first.label or "") + sep + child.label
+                        if first.ax_role in _TEXT_ONLY_ROLES:
+                            first.value = None
                     remove.add(child_idx)
             else:
                 run_start = None
@@ -995,3 +1299,79 @@ def prune(
         shorten_urls(kept_nodes)
 
     return kept_nodes, collapse_info, depth_collapsed_parents_new
+
+
+def prune_for_codex_tree(
+    nodes: list[Node],
+    *,
+    bundle_id: str | None = None,
+) -> list[Node]:
+    """Light pruning that preserves the raw AX hierarchy more faithfully.
+
+    This keeps the tree close to the source structure while still:
+    - removing obvious noise roles
+    - lifting labels from adjacent/static text into controls where needed
+    - collapsing simple text-only children into interactive parents
+    - reindexing the remaining nodes
+    """
+    if not nodes:
+        return []
+
+    apply_display_protocol(nodes)
+
+    skip_indices: set[int] = set()
+    skip_indices |= merge_labels_with_controls(nodes)
+
+    children_map, _parent_map = _build_tree_index(nodes)
+    skip_indices |= collapse_row_children_into_row(nodes, children_map)
+    skip_indices |= flatten_outline_rows(nodes, children_map)
+    children_map, _parent_map = _build_tree_index_excluding(nodes, skip_indices)
+    skip_indices |= drop_empty_outline_rows(nodes, children_map)
+    children_map, _parent_map = _build_tree_index_excluding(nodes, skip_indices)
+    skip_indices |= collapse_button_title_children(nodes, children_map)
+    children_map, _parent_map = _build_tree_index_excluding(nodes, skip_indices)
+    skip_indices |= combine_text_siblings(nodes, children_map)
+
+    for i, node in enumerate(nodes):
+        if node.ax_role == "AXList" and node.subrole == "AXCollectionList":
+            node.states = [state for state in node.states if state != "focused"]
+        if node.ax_role in _TEXT_ONLY_ROLES and node.label:
+            node.value = None
+        if node.ax_role in _CODEX_SKIP_ROLES:
+            skip_indices.add(i)
+            continue
+        if (
+            node.ax_role in _CODEX_EMPTY_WRAPPER_ROLES
+            and not node.label
+            and not node.description
+            and not node.value
+            and not node.secondary_actions
+            and (not node.ax_id or len(children_map.get(i, [])) == 1)
+        ):
+            skip_indices.add(i)
+            continue
+        if (
+            node.ax_role in {"AXImage", "AXStaticText"}
+            and not node.label
+            and not node.description
+            and not node.value
+        ):
+            skip_indices.add(i)
+
+    _, parent_map = _build_tree_index_excluding(nodes, skip_indices)
+    new_depths: dict[int, int] = {}
+    kept_nodes: list[Node] = []
+    for i, node in enumerate(nodes):
+        if i in skip_indices:
+            continue
+        parent_idx = parent_map.get(i)
+        if parent_idx is None:
+            node.depth = 0
+        else:
+            node.depth = new_depths[parent_idx] + 1
+        new_depths[i] = node.depth
+        node.index = len(kept_nodes)
+        kept_nodes.append(node)
+
+    shorten_urls(kept_nodes)
+    return kept_nodes
