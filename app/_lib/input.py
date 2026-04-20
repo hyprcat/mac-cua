@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from Quartz import (
@@ -31,7 +32,7 @@ from Quartz import (
 )
 from Quartz import CGPointMake
 
-from app._lib import screenshot
+from app._lib import screenshot, skylight
 from app._lib.errors import InputError, CGEventError
 from app._lib.keys import parse_key_combo
 
@@ -505,3 +506,106 @@ def type_text(pid: int, text: str, *, source: Any = None) -> None:
         else:
             _post_keycode_with_modifiers(pid, keycode, modifiers, source=source)
         time.sleep(0.005)
+
+
+@dataclass(frozen=True)
+class DeliveryResult:
+    transport_confirmed: bool
+    fallback_used: bool
+    micro_activated: bool
+
+
+def deliver_key_events(
+    *,
+    pid: int,
+    keycode: int,
+    modifiers: int,
+    source: Any,
+    delivery_method: Any,  # DeliveryMethod
+    confirmation_tap: Any,  # DeliveryConfirmationTap
+    activation_policy: Any,  # ActivationPolicy
+) -> DeliveryResult:
+    """Deliver a key press through the confirmed delivery pipeline.
+
+    Tries primary pipeline with discrete modifier sequences, confirms
+    via tap echo, falls back to alternate pipeline on timeout, and
+    optionally retries with micro-activation for qualified actions.
+    """
+    from app._lib.keys import decompose_modifier_sequence
+    from app._lib.virtual_cursor import DeliveryMethod, ActivationPolicy
+
+    mod_sequence = decompose_modifier_sequence(modifiers)
+
+    def _try_cgevent(src: Any) -> bool:
+        """Attempt delivery via CGEventPostToPid with discrete modifiers."""
+        for mod_keycode, cumulative_flags in mod_sequence:
+            confirmation_tap.reset()
+            _post_key_event(pid, mod_keycode, True, cumulative_flags, source=src)
+            if not confirmation_tap.wait():
+                return False
+
+        confirmation_tap.reset()
+        _post_key_event(pid, keycode, True, modifiers, source=src)
+        if not confirmation_tap.wait():
+            return False
+
+        confirmation_tap.reset()
+        _post_key_event(pid, keycode, False, modifiers, source=src)
+        if not confirmation_tap.wait():
+            return False
+
+        for i, (mod_keycode, _) in enumerate(reversed(mod_sequence)):
+            remaining_idx = len(mod_sequence) - 2 - i
+            remaining_flags = mod_sequence[remaining_idx][1] if remaining_idx >= 0 else 0
+            confirmation_tap.reset()
+            _post_key_event(pid, mod_keycode, False, remaining_flags, source=src)
+            if not confirmation_tap.wait():
+                return False
+
+        return True
+
+    def _try_skylight() -> bool:
+        """Attempt delivery via SkyLight SPI."""
+        if not skylight.is_available():
+            return False
+
+        for mod_keycode, _ in mod_sequence:
+            if not skylight.post_keyboard_event(pid, mod_keycode, True):
+                return False
+
+        if not skylight.post_keyboard_event(pid, keycode, True):
+            return False
+        if not skylight.post_keyboard_event(pid, keycode, False):
+            return False
+
+        for mod_keycode, _ in reversed(mod_sequence):
+            if not skylight.post_keyboard_event(pid, mod_keycode, False):
+                return False
+
+        return True
+
+    # Attempt 1: Primary pipeline
+    if delivery_method == DeliveryMethod.CGEVENT_PID:
+        if _try_cgevent(source):
+            return DeliveryResult(transport_confirmed=True, fallback_used=False, micro_activated=False)
+        # Fallback to SkyLight
+        if _try_skylight():
+            return DeliveryResult(transport_confirmed=True, fallback_used=True, micro_activated=False)
+    else:  # SKYLIGHT_SPI primary
+        if _try_skylight():
+            return DeliveryResult(transport_confirmed=True, fallback_used=False, micro_activated=False)
+        # Fallback to CGEvent
+        if _try_cgevent(source):
+            return DeliveryResult(transport_confirmed=True, fallback_used=True, micro_activated=False)
+
+    # Attempt 2: Retry with micro-activation if policy allows
+    if activation_policy == ActivationPolicy.RETRY_ONLY:
+        with skylight.micro_activate(target_pid=pid):
+            if delivery_method == DeliveryMethod.CGEVENT_PID:
+                if _try_cgevent(source):
+                    return DeliveryResult(transport_confirmed=True, fallback_used=True, micro_activated=True)
+            else:
+                if _try_skylight():
+                    return DeliveryResult(transport_confirmed=True, fallback_used=True, micro_activated=True)
+
+    return DeliveryResult(transport_confirmed=False, fallback_used=True, micro_activated=False)
