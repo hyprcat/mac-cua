@@ -264,11 +264,14 @@ def post_keyboard_event(pid: int, keycode: int, key_down: bool) -> bool:
     return True
 
 
-def _make_cgpoint(x: float, y: float) -> ctypes.Structure:
+class _CGPoint(ctypes.Structure):
+    """CGPoint struct for ctypes — defined once at module level."""
+    _fields_ = [("x", ctypes.c_double), ("y", ctypes.c_double)]
+
+
+def _make_cgpoint(x: float, y: float) -> _CGPoint:
     """Create a CGPoint struct for ctypes."""
-    class CGPoint(ctypes.Structure):
-        _fields_ = [("x", ctypes.c_double), ("y", ctypes.c_double)]
-    return CGPoint(x=x, y=y)
+    return _CGPoint(x=x, y=y)
 
 
 def post_mouse_event(pid: int, event_type: int, x: float, y: float, click_count: int = 1) -> bool:
@@ -340,20 +343,40 @@ def micro_activate(target_pid: int) -> Generator[None, None, None]:
             _set_frontmost(_main_cid, True)
 
 
+# Cache Foundation/CoreFoundation objects for _set_frontmost (avoid per-call imports)
+_frontmost_key: Any = None
+_cf_true: Any = None
+_cf_false: Any = None
+
+
+def _init_frontmost_cache() -> bool:
+    """One-time init of cached NSString/CFBoolean for micro-activation."""
+    global _frontmost_key, _cf_true, _cf_false
+    if _frontmost_key is not None:
+        return True
+    try:
+        from Foundation import NSString
+        from CoreFoundation import kCFBooleanTrue, kCFBooleanFalse
+        _frontmost_key = NSString.stringWithString_("SetFrontmost")
+        _cf_true = kCFBooleanTrue
+        _cf_false = kCFBooleanFalse
+        return True
+    except Exception:
+        return False
+
+
 def _set_frontmost(target_cid: int, frontmost: bool) -> None:
     """Set the frontmost flag on a window server connection."""
     if not is_available() or _framework is None or getattr(_framework, 'CGSSetConnectionProperty', None) is None:
         return
+    if not _init_frontmost_cache():
+        return
     try:
-        from Foundation import NSString
-        from CoreFoundation import kCFBooleanTrue, kCFBooleanFalse
-
-        key = NSString.stringWithString_("SetFrontmost")
-        value = kCFBooleanTrue if frontmost else kCFBooleanFalse
+        value = _cf_true if frontmost else _cf_false
         _framework.CGSSetConnectionProperty(
             _main_cid,
             target_cid,
-            ctypes.c_void_p(key.__c_void_p__()),
+            ctypes.c_void_p(_frontmost_key.__c_void_p__()),
             ctypes.c_void_p(value.__c_void_p__()),
         )
     except Exception as e:

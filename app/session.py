@@ -2141,12 +2141,15 @@ class SessionManager:
             child_count = len(node.children) if hasattr(node, 'children') else 0
 
         focused_id = None
-        try:
-            focused_id = accessibility.get_focused_element(
-                session.target.ax_app, session.tree_nodes
-            )
-        except Exception:
-            pass
+        if node is not None:
+            try:
+                focused = accessibility.get_focused_element(
+                    session.target.ax_app, session.tree_nodes
+                )
+                if focused is not None:
+                    focused_id = id(focused)
+            except Exception:
+                pass
 
         menu_open = False
         if session.menu_tracker is not None:

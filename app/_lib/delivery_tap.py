@@ -47,10 +47,20 @@ _ALL_INPUT_EVENTS = event_mask(
 )
 
 
-def CGEventGetIntegerValueField(event: Any, field: int) -> int:
-    """Wrapper — imported at call time to allow mocking in tests."""
+def _load_cgevent_get_field() -> Any:
+    """Load CGEventGetIntegerValueField once, cache for hot path."""
     from Quartz import CGEventGetIntegerValueField as _get
-    return _get(event, field)
+    return _get
+
+
+# Cached reference — resolved once, called per event tap callback.
+# Tests mock CGEventGetIntegerValueField at module level to override.
+_cgevent_get_field = _load_cgevent_get_field()
+
+
+def CGEventGetIntegerValueField(event: Any, field: int) -> int:
+    """Wrapper around CGEventGetIntegerValueField. Uses cached reference."""
+    return _cgevent_get_field(event, field)
 
 
 class DeliveryConfirmationTap:
