@@ -414,9 +414,10 @@ class SessionManager:
             )
             observer.stop()
         if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is None:
-            # Pass source_state_id so the monitor only counts OUR events, not user input
+            # Only add source filtering when confirmed_delivery is on — the
+            # per-event Quartz call adds latency to every HID event system-wide
             _source_id = None
-            if session.event_source is not None:
+            if feature_flags.confirmed_delivery and session.event_source is not None:
                 try:
                     from Quartz import CGEventSourceGetSourceStateID
                     _source_id = CGEventSourceGetSourceStateID(session.event_source)
