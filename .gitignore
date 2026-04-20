@@ -46,3 +46,7 @@ htmlcov/
 
 # Git worktrees
 .worktrees/
+
+# Docs and specs (kept locally, not in git)
+docs/
+specs/
