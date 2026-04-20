@@ -67,6 +67,18 @@ class AppType(Enum):
     UNKNOWN = "unknown"
 
 
+class DeliveryMethod(Enum):
+    """Primary event delivery pipeline."""
+    CGEVENT_PID = "cgevent_pid"      # CGEventPostToPid — works for native Cocoa
+    SKYLIGHT_SPI = "skylight_spi"    # CGSPostKeyboardEventToProcess — works for Electron/browser/Java/Qt
+
+
+class ActivationPolicy(Enum):
+    """When to use invisible micro-activation."""
+    NEVER = "never"            # Never micro-activate (AX actions, native Cocoa CGEvent)
+    RETRY_ONLY = "retry_only"  # Only on retry after background delivery failed
+
+
 # Known browser bundle IDs
 _BROWSER_BUNDLES: frozenset[str] = frozenset({
     "com.apple.Safari",
@@ -204,6 +216,32 @@ class InputStrategy:
     def reset_failures(self) -> None:
         """Reset failure count (e.g., on new session)."""
         self._ax_failure_count = 0
+
+    @property
+    def delivery_method(self) -> DeliveryMethod:
+        """Primary delivery pipeline for this app type."""
+        if self._app_type in (AppType.NATIVE_COCOA, AppType.UNKNOWN):
+            return DeliveryMethod.CGEVENT_PID
+        return DeliveryMethod.SKYLIGHT_SPI
+
+    @property
+    def alternate_delivery_method(self) -> DeliveryMethod:
+        """Fallback delivery pipeline."""
+        if self.delivery_method == DeliveryMethod.CGEVENT_PID:
+            return DeliveryMethod.SKYLIGHT_SPI
+        return DeliveryMethod.CGEVENT_PID
+
+    @property
+    def activation_policy(self) -> ActivationPolicy:
+        """When to use micro-activation for regular actions."""
+        if self._app_type in (AppType.NATIVE_COCOA, AppType.UNKNOWN):
+            return ActivationPolicy.NEVER
+        return ActivationPolicy.RETRY_ONLY
+
+    @property
+    def activation_policy_for_popup(self) -> ActivationPolicy:
+        """Popups always qualify for micro-activation retry."""
+        return ActivationPolicy.RETRY_ONLY
 
 
 # ---------------------------------------------------------------------------
