@@ -30,6 +30,15 @@ from Quartz import (
     kCGMouseButtonCenter,
     kCGMouseEventNumber,
 )
+from Quartz import (
+    CGEventCreateScrollWheelEvent,
+    kCGScrollEventUnitLine,
+    kCGScrollEventUnitPixel,
+    kCGScrollWheelEventPointDeltaAxis1,
+    kCGScrollWheelEventPointDeltaAxis2,
+    kCGScrollWheelEventFixedPtDeltaAxis1,
+    kCGScrollWheelEventFixedPtDeltaAxis2,
+)
 from Quartz import CGPointMake
 
 from app._lib import screenshot, skylight
@@ -54,7 +63,8 @@ _DOUBLE_CLICK_INTERVAL = 0.1
 _KEY_HOLD_DELAY = 0.008  # delay between key down and key up
 _KEY_EVENT_DELAY = 0.003
 _MOUSE_PRESSURE = 1.0
-_SCROLL_LINE_DELTA = 5
+SCROLL_PIXEL_QUANTUM = 80
+_LINE_DELTA = 5
 _MOUSE_EVENT_NUMBER = 0
 
 _TEXT_KEY_ALIASES = {
@@ -357,13 +367,13 @@ _SCROLL_STEP_DELAY = 0.015  # delay between individual scroll events
 def _scroll_deltas(direction: str) -> tuple[int, int]:
     """Return (dy, dx) unit delta for a scroll direction."""
     if direction == "up":
-        return (_SCROLL_LINE_DELTA, 0)
+        return (_LINE_DELTA, 0)
     elif direction == "down":
-        return (-_SCROLL_LINE_DELTA, 0)
+        return (-_LINE_DELTA, 0)
     elif direction == "left":
-        return (0, _SCROLL_LINE_DELTA)
+        return (0, _LINE_DELTA)
     elif direction == "right":
-        return (0, -_SCROLL_LINE_DELTA)
+        return (0, -_LINE_DELTA)
     return (0, 0)
 
 
@@ -381,8 +391,6 @@ def scroll_pid(
 
     Works for native Cocoa apps but silently ignored by browsers/Electron.
     """
-    from Quartz import CGEventCreateScrollWheelEvent, kCGScrollEventUnitLine
-
     point = CGPointMake(x, y)
     src = source if source is not None else _source
 
@@ -415,13 +423,6 @@ def scroll_pid_pixel(
     source: Any = None,
 ) -> None:
     """Scroll via pixel deltas for better cross-app background delivery."""
-    from Quartz import (
-        CGEventCreateScrollWheelEvent,
-        kCGScrollEventUnitPixel,
-        kCGScrollWheelEventPointDeltaAxis1,
-        kCGScrollWheelEventPointDeltaAxis2,
-    )
-
     point = CGPointMake(x, y)
     src = source if source is not None else _source
     move = CGEventCreateMouseEvent(src, kCGEventMouseMoved, point, kCGMouseButtonLeft)
@@ -444,49 +445,13 @@ def scroll_pid_pixel(
     scroll = CGEventCreateScrollWheelEvent(src, kCGScrollEventUnitPixel, 2, dy, dx)
     if scroll is None:
         raise CGEventError("CGEventCreateScrollWheelEvent returned NULL")
+    # Integer deltas — read by Chromium-based apps
     CGEventSetIntegerValueField(scroll, kCGScrollWheelEventPointDeltaAxis1, dy)
     CGEventSetIntegerValueField(scroll, kCGScrollWheelEventPointDeltaAxis2, dx)
+    # Fixed-point deltas — read by native Cocoa apps
+    CGEventSetDoubleValueField(scroll, kCGScrollWheelEventFixedPtDeltaAxis1, float(dy))
+    CGEventSetDoubleValueField(scroll, kCGScrollWheelEventFixedPtDeltaAxis2, float(dx))
     CGEventPostToPid(pid, scroll)
-
-
-def scroll_system(x: float, y: float,
-                  direction: str, clicks: int = 5) -> None:
-    """Scroll via CGEventPost with cursor warp/restore.
-
-    Warps cursor to target, posts scroll events to system event stream,
-    warps cursor back. Works across all app types including browsers and
-    Electron. Brief cursor teleport (~100ms).
-    """
-    from Quartz import (
-        CGEventCreateScrollWheelEvent, kCGScrollEventUnitLine,
-        CGEventPost, kCGHIDEventTap,
-        CGEventCreate, CGEventGetLocation,
-        CGWarpMouseCursorPosition,
-    )
-
-    point = CGPointMake(x, y)
-
-    # Save current cursor position
-    orig = CGEventGetLocation(CGEventCreate(None))
-
-    # Warp cursor to scroll target
-    CGWarpMouseCursorPosition(point)
-    time.sleep(0.02)
-
-    # Post scroll events to system event stream
-    dy, dx = _scroll_deltas(direction)
-    for i in range(clicks):
-        scroll = CGEventCreateScrollWheelEvent(_source, kCGScrollEventUnitLine, 2, dy, dx)
-        if scroll is None:
-            raise CGEventError("CGEventCreateScrollWheelEvent returned NULL")
-        CGEventPost(kCGHIDEventTap, scroll)
-        if i < clicks - 1:
-            time.sleep(_SCROLL_STEP_DELAY)
-
-    time.sleep(0.05)
-
-    # Restore cursor position
-    CGWarpMouseCursorPosition(CGPointMake(orig.x, orig.y))
 
 
 def type_text(pid: int, text: str, *, source: Any = None) -> None:
