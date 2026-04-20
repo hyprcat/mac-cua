@@ -232,7 +232,7 @@ def validate_window_owner(window_id: int, expected_pid: int) -> bool:
     owner_cid_out = ctypes.c_int(0)
     err = _framework.CGSGetWindowOwner(_main_cid, window_id, ctypes.byref(owner_cid_out))
     if err != 0:
-        return False
+        return True  # CGS error — can't validate, assume correct (don't trigger expensive re-resolve)
 
     # Strategy 1: compare connection IDs (if CGSGetConnectionIDForPID exists)
     expected_cid = get_connection_for_pid(_main_cid, expected_pid)

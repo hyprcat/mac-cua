@@ -187,6 +187,8 @@ class ActionOutcomeMonitor:
 
 
 class CGEventOutcomeMonitor:
+    _kCGEventSourceStateID = 45
+
     def __init__(self, *, history_limit: int = 256, source_state_id: int | None = None) -> None:
         self._history_limit = history_limit
         self._source_state_id = source_state_id
@@ -195,6 +197,18 @@ class CGEventOutcomeMonitor:
         self._sequence = 0
         self._tap: EventTap | None = None
         self._started = False
+        # Cache the Quartz function reference for hot-path callback
+        self._cg_get_field: Any = None
+        try:
+            from Quartz import CGEventGetIntegerValueField
+            self._cg_get_field = CGEventGetIntegerValueField
+        except ImportError:
+            pass
+
+    def _get_source_id(self, event: Any) -> int:
+        if self._cg_get_field is None:
+            return 0
+        return self._cg_get_field(event, self._kCGEventSourceStateID)
 
     @property
     def is_started(self) -> bool:
@@ -254,9 +268,7 @@ class CGEventOutcomeMonitor:
         # Filter by source_state_id to distinguish automation from user input
         if self._source_state_id is not None:
             try:
-                from Quartz import CGEventGetIntegerValueField
-                _kCGEventSourceStateID = 45
-                event_source_id = CGEventGetIntegerValueField(event, _kCGEventSourceStateID)
+                event_source_id = self._get_source_id(event)
                 if event_source_id != self._source_state_id:
                     return event  # Not our event — skip
             except Exception:
