@@ -54,6 +54,7 @@ from Quartz import (
 from PIL import Image
 
 from app._lib.errors import ScreenshotError
+from app._lib import skylight
 
 
 _FLOAT_RE = r"-?\d+(?:\.\d+)?"
@@ -483,3 +484,36 @@ def prompt_screen_recording_permission() -> bool:
         return CGPreflightScreenCaptureAccess()
     except (ImportError, AttributeError):
         return check_screen_recording_permission()
+
+
+def validate_and_capture(
+    window_id: int,
+    expected_pid: int,
+) -> tuple[Image.Image, int] | None:
+    """Validate window ownership, re-resolve if stale, then capture.
+
+    Returns (image, validated_window_id) or None if no valid window found.
+    """
+    valid_wid = window_id
+
+    if not skylight.validate_window_owner(window_id, expected_pid):
+        logger.info(
+            "[screenshot] Window %d no longer belongs to pid %d, re-resolving",
+            window_id, expected_pid,
+        )
+        # Re-resolve from window list
+        candidates = [
+            w for w in list_windows(owner_pid=expected_pid)
+            if w.onscreen and w.width > 0 and w.height > 0
+        ]
+        if not candidates:
+            return None
+        # Pick the largest window (most likely the main one)
+        candidates.sort(key=lambda w: w.width * w.height, reverse=True)
+        valid_wid = candidates[0].window_id
+
+    image = capture_window(valid_wid)
+    if image is None:
+        return None
+
+    return (image, valid_wid)
