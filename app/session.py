@@ -250,6 +250,7 @@ class AppSession:
     # Values: "ax", "pid", "system", None
     scroll_method: str | None = field(default=None, repr=False)
     last_action_verification: ActionVerificationResult | None = field(default=None, repr=False)
+    last_delivery_verdict: Any = field(default=None, repr=False)  # DeliveryVerdict
     # Confirmed delivery pipeline — per-session event source and transport confirmation
     event_source: Any = field(default=None, repr=False)
     delivery_tap: Any = field(default=None, repr=False)  # DeliveryConfirmationTap
@@ -2127,6 +2128,61 @@ class SessionManager:
             return ActionVerificationResult.NO_EFFECT
         return ActionVerificationResult.TIMEOUT
 
+    def _capture_element_snapshot(self, session: AppSession, node: Node | None) -> Any:
+        """Capture lightweight element state for pre/post comparison."""
+        from app._lib.confirmed_verification import ElementSnapshot
+
+        value = None
+        selected = False
+        child_count = 0
+        if node is not None:
+            value = getattr(node, 'value', None)
+            selected = getattr(node, 'selected', False)
+            child_count = len(node.children) if hasattr(node, 'children') else 0
+
+        focused_id = None
+        try:
+            focused_id = accessibility.get_focused_element(
+                session.target.ax_app, session.tree_nodes
+            )
+        except Exception:
+            pass
+
+        menu_open = False
+        if session.menu_tracker is not None:
+            menu_open = session.menu_tracker.menus_open
+
+        return ElementSnapshot(
+            value=value,
+            selected=selected,
+            focused_element_id=focused_id,
+            menu_open=menu_open,
+            child_count=child_count,
+        )
+
+    def _compute_delivery_verdict(
+        self,
+        session: AppSession,
+        before: Any,
+        after: Any,
+        *,
+        transport_confirmed: bool,
+        fallback_used: bool,
+        expected: Any,
+    ) -> Any:
+        """Compute and store the delivery verdict alongside existing verification."""
+        from app._lib.confirmed_verification import ActionVerifier
+
+        diff = before.diff(after)
+        verdict = ActionVerifier.compute_verdict(
+            transport_confirmed=transport_confirmed,
+            diff_any_changed=diff.any_changed,
+            expected=expected,
+            fallback_used=fallback_used,
+        )
+        session.last_delivery_verdict = verdict
+        return verdict
+
     def _take_transient_snapshot(
         self,
         session: AppSession,
@@ -2697,6 +2753,9 @@ class SessionManager:
             if ax_result is not None:
                 return ax_result
 
+            # Pre-snapshot for delivery verdict (coord click path)
+            before_snapshot_coord = self._capture_element_snapshot(session, None)
+
             try:
                 transport_mark = 0
                 if session.cgevent_outcome_monitor is not None:
@@ -2729,6 +2788,14 @@ class SessionManager:
                         ActionVerificationResult.TRANSIENT_OPENED,
                     }:
                         raise InputError("Coordinate click had no observed effect")
+                from app._lib.confirmed_verification import ExpectedDiff
+                after_snapshot_coord = self._capture_element_snapshot(session, None)
+                self._compute_delivery_verdict(
+                    session, before_snapshot_coord, after_snapshot_coord,
+                    transport_confirmed=True,
+                    fallback_used=False,
+                    expected=ExpectedDiff.FOCUS_OR_LAYOUT,
+                )
                 return f"Clicked at ({x}, {y}) (CGEventPostToPid)"
             except InputError as exc:
                 logger.debug(
@@ -2772,6 +2839,14 @@ class SessionManager:
                             ActionVerificationResult.TRANSIENT_OPENED,
                         }:
                             raise InputError("Coordinate click had no observed effect after refresh")
+                    from app._lib.confirmed_verification import ExpectedDiff
+                    after_snapshot_coord = self._capture_element_snapshot(session, None)
+                    self._compute_delivery_verdict(
+                        session, before_snapshot_coord, after_snapshot_coord,
+                        transport_confirmed=True,
+                        fallback_used=False,
+                        expected=ExpectedDiff.FOCUS_OR_LAYOUT,
+                    )
                     return f"Clicked at ({x}, {y}) (CGEventPostToPid, refreshed window)"
                 except InputError as retry_exc:
                     logger.debug(
@@ -2861,6 +2936,9 @@ class SessionManager:
             if session.ax_outcome_monitor is not None
             else None
         )
+        # Pre-snapshot for delivery verdict
+        type_target_node = node if el_idx is not None else None
+        before_snapshot_type = self._capture_element_snapshot(session, type_target_node)
         cg_input.type_text(input_pid, text, source=session.event_source)
         if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
             direct_verifier = None
@@ -2883,6 +2961,15 @@ class SessionManager:
                 ActionVerificationResult.TRANSIENT_OPENED,
             }:
                 raise AutomationError("type_text had no observed effect")
+        # Post-snapshot and verdict (alongside existing verification)
+        after_snapshot_type = self._capture_element_snapshot(session, type_target_node)
+        from app._lib.confirmed_verification import ExpectedDiff
+        self._compute_delivery_verdict(
+            session, before_snapshot_type, after_snapshot_type,
+            transport_confirmed=True,
+            fallback_used=False,
+            expected=ExpectedDiff.VALUE_CHANGED,
+        )
         if el_idx is None:
             return f"Typed {text!r} into the current focused element"
         return f"Typed {text!r} into element {el_idx} (background key events)"
@@ -2995,6 +3082,8 @@ class SessionManager:
         t = session.target
         key = params["key"]
         el_idx = params.get("element_index")
+        node = None
+        delivery_result = None
 
         if el_idx is not None:
             node = self._resolve_index(session, int(el_idx))
@@ -3038,6 +3127,10 @@ class SessionManager:
             if session.ax_outcome_monitor is not None
             else None
         )
+        # Pre-snapshot for delivery verdict
+        target_node = node if el_idx is not None else None
+        before_snapshot = self._capture_element_snapshot(session, target_node)
+
         # Resolve key to keycode + modifiers for delivery pipeline
         resolved_key = cg_input._coerce_text_key(key)
         if resolved_key == " ":
@@ -3085,6 +3178,15 @@ class SessionManager:
                 ActionVerificationResult.TRANSIENT_CLOSED,
             }:
                 raise AutomationError("press_key had no observed effect")
+        # Post-snapshot and verdict (alongside existing verification)
+        after_snapshot = self._capture_element_snapshot(session, target_node)
+        from app._lib.confirmed_verification import ExpectedDiff
+        self._compute_delivery_verdict(
+            session, before_snapshot, after_snapshot,
+            transport_confirmed=delivery_result.transport_confirmed if delivery_result is not None else True,
+            fallback_used=delivery_result.fallback_used if delivery_result is not None else False,
+            expected=ExpectedDiff.LAYOUT_OR_MENU,
+        )
         if el_idx is None:
             return f"Pressed {key} in {t.bundle_id} (background key event)"
         return f"Pressed {key} on element {el_idx} (background key event)"
@@ -3096,6 +3198,9 @@ class SessionManager:
         from_y = float(params["from_y"])
         to_x = float(params["to_x"])
         to_y = float(params["to_y"])
+
+        # Pre-snapshot for delivery verdict
+        before_snapshot_drag = self._capture_element_snapshot(session, None)
 
         try:
             transport_mark = 0
@@ -3165,6 +3270,15 @@ class SessionManager:
                 }:
                     raise AutomationError("drag had no observed effect after refresh")
 
+        # Post-snapshot and verdict (alongside existing verification)
+        after_snapshot_drag = self._capture_element_snapshot(session, None)
+        from app._lib.confirmed_verification import ExpectedDiff
+        self._compute_delivery_verdict(
+            session, before_snapshot_drag, after_snapshot_drag,
+            transport_confirmed=True,
+            fallback_used=False,
+            expected=ExpectedDiff.FOCUS_OR_LAYOUT,
+        )
         return f"Dragged from ({from_x}, {from_y}) to ({to_x}, {to_y})"
 
     def _handle_secondary_action(self, session: AppSession, params: dict) -> str:
