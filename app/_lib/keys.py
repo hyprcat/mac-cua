@@ -217,3 +217,22 @@ def parse_key_combo(combo: str) -> tuple[int, int]:
 
 def modifier_keycodes(mask: int) -> list[tuple[int, int]]:
     return [(keycode, flag) for flag, keycode in _MODIFIER_KEYCODES if mask & flag]
+
+
+def decompose_modifier_sequence(mask: int) -> list[tuple[int, int]]:
+    """Decompose a modifier mask into an ordered sequence for discrete key events.
+
+    Returns a list of ``(keycode, cumulative_flags)`` tuples in the order
+    modifiers should be pressed (sorted by flag bit position ascending).
+    Each entry's ``cumulative_flags`` is the bitwise OR of all flags up to
+    and including that modifier — matching what a real keyboard produces
+    in its ``flagsChanged`` event stream.
+    """
+    present = [(flag, keycode) for flag, keycode in _MODIFIER_KEYCODES if mask & flag]
+    present.sort(key=lambda pair: pair[0])  # ascending by flag bit value
+    result: list[tuple[int, int]] = []
+    cumulative = 0
+    for flag, keycode in present:
+        cumulative |= flag
+        result.append((keycode, cumulative))
+    return result
