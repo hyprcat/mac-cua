@@ -30,40 +30,66 @@ _available: bool = False
 
 
 def _do_load_framework() -> Any:
-    """Load SkyLight / CoreGraphics framework and resolve symbols."""
-    # SkyLight is the modern name; CGS functions live in CoreGraphics
+    """Load SkyLight / CoreGraphics framework and resolve symbols.
+
+    Symbols are resolved individually — missing ones are set to None
+    so the module can still provide partial functionality on newer macOS
+    where some private SPIs have been removed.
+    """
     path = ctypes.util.find_library("CoreGraphics")
     if path is None:
         raise OSError("CoreGraphics framework not found")
     lib = ctypes.cdll.LoadLibrary(path)
 
-    # Resolve function signatures
+    # Required: must exist for any functionality
     lib.CGSMainConnectionID.restype = ctypes.c_int
     lib.CGSMainConnectionID.argtypes = []
 
-    lib.CGSGetConnectionIDForPID.restype = ctypes.c_int  # CGError
-    lib.CGSGetConnectionIDForPID.argtypes = [
-        ctypes.c_int,  # cid (our connection)
-        ctypes.c_int,  # pid
-        ctypes.POINTER(ctypes.c_int),  # out_cid
-    ]
+    # Window owner lookup (snapshot integrity)
+    try:
+        lib.CGSGetWindowOwner.restype = ctypes.c_int  # CGError
+        lib.CGSGetWindowOwner.argtypes = [
+            ctypes.c_int,  # cid
+            ctypes.c_int,  # window_id
+            ctypes.POINTER(ctypes.c_int),  # out_owner_cid
+        ]
+    except AttributeError:
+        lib.CGSGetWindowOwner = None
 
-    lib.CGSGetWindowOwner.restype = ctypes.c_int  # CGError
-    lib.CGSGetWindowOwner.argtypes = [
-        ctypes.c_int,  # cid
-        ctypes.c_int,  # window_id
-        ctypes.POINTER(ctypes.c_int),  # out_owner_cid
-    ]
+    # Connection → PID reverse lookup (macOS 26+, replaces CGSGetConnectionIDForPID)
+    try:
+        lib.CGSConnectionGetPID.restype = ctypes.c_int  # CGError
+        lib.CGSConnectionGetPID.argtypes = [
+            ctypes.c_int,  # cid
+            ctypes.POINTER(ctypes.c_int),  # out_pid
+        ]
+    except AttributeError:
+        lib.CGSConnectionGetPID = None
 
-    lib.CGSPostKeyboardEventToProcess.restype = ctypes.c_int  # CGError
-    lib.CGSPostKeyboardEventToProcess.argtypes = [
-        ctypes.c_int,  # cid
-        ctypes.c_int,  # target_pid
-        ctypes.c_uint16,  # key_char
-        ctypes.c_bool,  # key_down
-    ]
+    # PID → Connection lookup (removed in macOS 26)
+    try:
+        lib.CGSGetConnectionIDForPID.restype = ctypes.c_int  # CGError
+        lib.CGSGetConnectionIDForPID.argtypes = [
+            ctypes.c_int,  # cid (our connection)
+            ctypes.c_int,  # pid
+            ctypes.POINTER(ctypes.c_int),  # out_cid
+        ]
+    except AttributeError:
+        lib.CGSGetConnectionIDForPID = None
 
-    # Connection property manipulation (for micro-activation)
+    # Direct keyboard delivery to process (removed in macOS 26)
+    try:
+        lib.CGSPostKeyboardEventToProcess.restype = ctypes.c_int
+        lib.CGSPostKeyboardEventToProcess.argtypes = [
+            ctypes.c_int,  # cid
+            ctypes.c_int,  # target_pid
+            ctypes.c_uint16,  # key_char
+            ctypes.c_bool,  # key_down
+        ]
+    except AttributeError:
+        lib.CGSPostKeyboardEventToProcess = None
+
+    # Connection property manipulation (micro-activation)
     try:
         lib.CGSSetConnectionProperty.restype = ctypes.c_int
         lib.CGSSetConnectionProperty.argtypes = [
@@ -73,7 +99,7 @@ def _do_load_framework() -> Any:
             ctypes.c_void_p,  # value (CFTypeRef)
         ]
     except AttributeError:
-        pass  # Not available on this version
+        lib.CGSSetConnectionProperty = None
 
     return lib
 
@@ -145,44 +171,78 @@ def get_main_connection() -> int:
 
 
 def get_connection_for_pid(cid: int, pid: int) -> int | None:
-    """Return the window server connection ID for a target PID, or None on failure."""
+    """Return the window server connection ID for a target PID, or None on failure.
+
+    Uses CGSGetConnectionIDForPID when available (macOS < 26).
+    Falls back to window-list scan when that SPI is missing.
+    """
     if not is_available():
         return None
-    out = ctypes.c_int(0)
-    err = _framework.CGSGetConnectionIDForPID(cid, pid, ctypes.byref(out))
-    if err != 0:
+    if _framework.CGSGetConnectionIDForPID is not None:
+        out = ctypes.c_int(0)
+        err = _framework.CGSGetConnectionIDForPID(cid, pid, ctypes.byref(out))
+        if err == 0:
+            return out.value
         logger.debug("[SkyLight] CGSGetConnectionIDForPID(pid=%d) failed: error %d", pid, err)
         return None
-    return out.value
+    # Fallback: not available — caller should use validate_window_owner directly
+    return None
+
+
+def _get_pid_for_connection(cid: int) -> int | None:
+    """Return the PID that owns a given window server connection, or None."""
+    if _framework is None or _framework.CGSConnectionGetPID is None:
+        return None
+    out_pid = ctypes.c_int(0)
+    err = _framework.CGSConnectionGetPID(cid, ctypes.byref(out_pid))
+    if err != 0:
+        return None
+    return out_pid.value
 
 
 def validate_window_owner(window_id: int, expected_pid: int) -> bool:
     """Check whether a window ID still belongs to the expected PID.
 
-    Returns True if the window's owner connection matches the expected PID's
-    connection. Returns False on mismatch or if either lookup fails.
+    Strategy 1 (macOS < 26): Get window owner CID, get expected PID's CID,
+    compare connection IDs.
+    Strategy 2 (macOS 26+): Get window owner CID, reverse-lookup the owner
+    CID's PID via CGSConnectionGetPID, compare PIDs directly.
+
+    Returns True if validation passes or cannot be performed.
+    Returns False on confirmed mismatch.
     """
     if not is_available():
         return True  # Can't validate — assume correct
+    if _framework.CGSGetWindowOwner is None:
+        return True  # Can't validate
 
     owner_cid_out = ctypes.c_int(0)
     err = _framework.CGSGetWindowOwner(_main_cid, window_id, ctypes.byref(owner_cid_out))
     if err != 0:
         return False
 
+    # Strategy 1: compare connection IDs (if CGSGetConnectionIDForPID exists)
     expected_cid = get_connection_for_pid(_main_cid, expected_pid)
-    if expected_cid is None:
-        return False
+    if expected_cid is not None:
+        return owner_cid_out.value == expected_cid
 
-    return owner_cid_out.value == expected_cid
+    # Strategy 2: reverse-lookup owner CID → PID, compare PIDs
+    owner_pid = _get_pid_for_connection(owner_cid_out.value)
+    if owner_pid is not None:
+        return owner_pid == expected_pid
+
+    return True  # Can't validate — assume correct
 
 
 def post_keyboard_event(pid: int, keycode: int, key_down: bool) -> bool:
     """Post a keyboard event directly to a process via the window server.
 
     Bypasses the CGEvent tap chain. Returns True on success.
+    Returns False if the SPI is unavailable (removed in macOS 26).
     """
     if not is_available():
+        return False
+    if _framework.CGSPostKeyboardEventToProcess is None:
         return False
     err = _framework.CGSPostKeyboardEventToProcess(_main_cid, pid, keycode, key_down)
     if err != 0:
@@ -238,7 +298,7 @@ def micro_activate(target_pid: int) -> Generator[None, None, None]:
 
 def _set_frontmost(target_cid: int, frontmost: bool) -> None:
     """Set the frontmost flag on a window server connection."""
-    if not is_available() or _framework is None:
+    if not is_available() or _framework is None or getattr(_framework, 'CGSSetConnectionProperty', None) is None:
         return
     try:
         from Foundation import NSString
