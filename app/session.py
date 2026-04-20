@@ -2782,16 +2782,33 @@ class SessionManager:
                     if session.ax_outcome_monitor is not None
                     else None
                 )
-                cg_input.click_at(
-                    t.window_pid,
-                    t.window_id,
-                    float(x),
-                    float(y),
-                    button=button,
-                    count=count,
-                    screenshot_size=session.screenshot_size,
-                    source=session.event_source,
-                )
+                if feature_flags.confirmed_delivery and session.delivery_tap is not None:
+                    from app._lib.input import deliver_click
+                    from Quartz import CGPointMake
+                    sx, sy = cg_input.window_to_screen_coords(
+                        t.window_id, float(x), float(y), session.screenshot_size,
+                    )
+                    click_result = deliver_click(
+                        pid=t.window_pid,
+                        point=CGPointMake(sx, sy),
+                        button=button,
+                        count=count,
+                        window_id=t.window_id,
+                        source=session.event_source,
+                        confirmation_tap=session.delivery_tap,
+                    )
+                else:
+                    click_result = None
+                    cg_input.click_at(
+                        t.window_pid,
+                        t.window_id,
+                        float(x),
+                        float(y),
+                        button=button,
+                        count=count,
+                        screenshot_size=session.screenshot_size,
+                        source=session.event_source,
+                    )
                 if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
                     verification = self._verify_cgevent_contract(
                         session,
@@ -3694,15 +3711,28 @@ class SessionManager:
                 if session.ax_outcome_monitor is not None
                 else None
             )
-            cg_input.scroll_pid_pixel(
-                self._background_pid_for_node(session, node),
-                point[0],
-                point[1],
-                direction,
-                pixels,
-                window_id=session.target.window_id,
-                source=session.event_source,
-            )
+            scroll_pid = self._background_pid_for_node(session, node)
+            if feature_flags.confirmed_delivery and session.delivery_tap is not None:
+                from app._lib.input import deliver_scroll
+                scroll_result = deliver_scroll(
+                    pid=scroll_pid,
+                    direction=direction,
+                    pixels=pixels,
+                    source=session.event_source,
+                    confirmation_tap=session.delivery_tap,
+                )
+                if not scroll_result.transport_confirmed:
+                    logger.debug("scroll_pid_pixel transport not confirmed")
+            else:
+                cg_input.scroll_pid_pixel(
+                    scroll_pid,
+                    point[0],
+                    point[1],
+                    direction,
+                    pixels,
+                    window_id=session.target.window_id,
+                    source=session.event_source,
+                )
             if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
                 verification = self._verify_cgevent_contract(
                     session,

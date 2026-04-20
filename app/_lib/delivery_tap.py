@@ -75,6 +75,7 @@ class DeliveryConfirmationTap:
         self._expected_source_id = expected_source_state_id
         self.transport_confirmed = threading.Event()
         self._tap: EventTap | None = None
+        self._listening = False  # Only process events when actively waiting
 
     def start(self) -> bool:
         """Install the listen-only tap on the session event stream."""
@@ -93,15 +94,20 @@ class DeliveryConfirmationTap:
             self._tap = None
 
     def reset(self) -> None:
-        """Clear the confirmed flag before posting the next event."""
+        """Clear the confirmed flag and activate listening."""
         self.transport_confirmed.clear()
+        self._listening = True
 
     def wait(self, timeout: float = TRANSPORT_TIMEOUT_S) -> bool:
         """Wait for transport confirmation. Returns True if confirmed."""
-        return self.transport_confirmed.wait(timeout=timeout)
+        result = self.transport_confirmed.wait(timeout=timeout)
+        self._listening = False  # Stop processing events between deliveries
+        return result
 
     def _on_event(self, proxy: Any, event_type: int, event: Any) -> Any:
-        """Event tap callback — check if this is our event."""
+        """Event tap callback — check if this is our event. No-op unless listening."""
+        if not self._listening:
+            return event  # Fast exit — not waiting for confirmation
         try:
             source_id = CGEventGetIntegerValueField(event, _kCGEventSourceStateID)
             if source_id == self._expected_source_id:

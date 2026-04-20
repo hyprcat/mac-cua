@@ -10,6 +10,7 @@ from app._lib.delivery_tap import DeliveryConfirmationTap
 class DeliveryConfirmationTapTests(unittest.TestCase):
     def test_signal_fires_when_source_id_matches(self) -> None:
         tap = DeliveryConfirmationTap(expected_source_state_id=42)
+        tap.reset()  # Activates listening
         event = MagicMock()
 
         with patch("app._lib.delivery_tap.CGEventGetIntegerValueField", return_value=42):

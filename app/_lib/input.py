@@ -595,3 +595,112 @@ def deliver_type_text(
         fallback_used=False,
         micro_activated=False,
     )
+
+
+def deliver_click(
+    *,
+    pid: int,
+    point: Any,
+    button: str,
+    count: int,
+    window_id: int | None,
+    source: Any,
+    confirmation_tap: Any,
+) -> DeliveryResult:
+    """Click through the confirmed delivery pipeline.
+
+    Posts mouseDown/mouseUp via CGEventPostToPid with per-event
+    confirmation through the delivery tap.
+    """
+    if button not in _BUTTON_MAP:
+        raise InputError(f"Unknown mouse button: {button}")
+
+    btn, down_type, up_type = _BUTTON_MAP[button]
+    src = source if source is not None else _source
+    any_failed = False
+
+    for click_num in range(1, count + 1):
+        if click_num > 1:
+            time.sleep(_DOUBLE_CLICK_INTERVAL)
+
+        down = CGEventCreateMouseEvent(src, down_type, point, btn)
+        if down is None:
+            raise CGEventError("cg_event_creation_failed: mouseDown")
+        _decorate_mouse_event(
+            down,
+            window_id=window_id,
+            pressure=_MOUSE_PRESSURE,
+            click_state=click_num,
+            event_number=_mouse_counter.next(),
+        )
+        confirmation_tap.reset()
+        CGEventPostToPid(pid, down)
+        if not confirmation_tap.wait():
+            any_failed = True
+
+        time.sleep(0.005)
+
+        up = CGEventCreateMouseEvent(src, up_type, point, btn)
+        if up is None:
+            raise CGEventError("cg_event_creation_failed: mouseUp")
+        _decorate_mouse_event(
+            up,
+            window_id=window_id,
+            pressure=0.0,
+            click_state=click_num,
+            event_number=_mouse_counter.next(),
+        )
+        confirmation_tap.reset()
+        CGEventPostToPid(pid, up)
+        if not confirmation_tap.wait():
+            any_failed = True
+
+    return DeliveryResult(
+        transport_confirmed=not any_failed,
+        fallback_used=False,
+        micro_activated=False,
+    )
+
+
+def deliver_scroll(
+    *,
+    pid: int,
+    direction: str,
+    pixels: int,
+    source: Any,
+    confirmation_tap: Any,
+) -> DeliveryResult:
+    """Scroll through the confirmed delivery pipeline.
+
+    Posts pixel-based scroll event via CGEventPostToPid with
+    confirmation through the delivery tap.
+    """
+    src = source if source is not None else _source
+
+    dy = dx = 0
+    if direction == "up":
+        dy = pixels
+    elif direction == "down":
+        dy = -pixels
+    elif direction == "left":
+        dx = pixels
+    elif direction == "right":
+        dx = -pixels
+
+    scroll = CGEventCreateScrollWheelEvent(src, kCGScrollEventUnitPixel, 2, dy, dx)
+    if scroll is None:
+        raise CGEventError("cg_event_creation_failed: scrollWheel")
+    CGEventSetIntegerValueField(scroll, kCGScrollWheelEventPointDeltaAxis1, dy)
+    CGEventSetIntegerValueField(scroll, kCGScrollWheelEventPointDeltaAxis2, dx)
+    CGEventSetDoubleValueField(scroll, kCGScrollWheelEventFixedPtDeltaAxis1, float(dy))
+    CGEventSetDoubleValueField(scroll, kCGScrollWheelEventFixedPtDeltaAxis2, float(dx))
+
+    confirmation_tap.reset()
+    CGEventPostToPid(pid, scroll)
+    confirmed = confirmation_tap.wait()
+
+    return DeliveryResult(
+        transport_confirmed=confirmed,
+        fallback_used=False,
+        micro_activated=False,
+    )
