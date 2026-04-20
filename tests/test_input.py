@@ -143,9 +143,16 @@ class InputTests(unittest.TestCase):
         post_unicode_mock.assert_called_once_with(456, "🙂", source=None)
 
 
-class DiscreteModifierTests(unittest.TestCase):
-    def test_shift_cmd_s_produces_six_events(self) -> None:
-        """shift+cmd+s should emit: shift_down, cmd_down, s_down, s_up, cmd_up, shift_up."""
+class CompoundModifierTests(unittest.TestCase):
+    """Verify _post_keycode_with_modifiers uses compound events (NOT discrete flagsChanged).
+
+    Discrete flagsChanged via CGEventPostToPid leaks to global modifier state
+    and corrupts the user's keyboard. Compound events embed modifiers as flags
+    on keyDown/keyUp, which is safe.
+    """
+
+    def test_shift_cmd_s_produces_two_compound_events(self) -> None:
+        """shift+cmd+s: keyDown(s, flags=shift|cmd), keyUp(s, flags=shift|cmd)."""
         events_posted = []
 
         def track_event(pid, event):
@@ -162,17 +169,12 @@ class DiscreteModifierTests(unittest.TestCase):
         ):
             cg_input._post_keycode_with_modifiers(123, 1, MASK_SHIFT | MASK_COMMAND)
 
-        # 6 events: shift_down, cmd_down, s_down, s_up, cmd_up, shift_up
-        self.assertEqual(len(events_posted), 6)
-        self.assertEqual(events_posted[0], (56, True))   # shift down
-        self.assertEqual(events_posted[1], (55, True))   # cmd down
-        self.assertEqual(events_posted[2], (1, True))    # s down
-        self.assertEqual(events_posted[3], (1, False))   # s up
-        self.assertEqual(events_posted[4], (55, False))  # cmd up
-        self.assertEqual(events_posted[5], (56, False))  # shift up
+        # Only 2 events — modifiers embedded as flags, no separate flagsChanged
+        self.assertEqual(len(events_posted), 2)
+        self.assertEqual(events_posted[0], (1, True))   # keyDown
+        self.assertEqual(events_posted[1], (1, False))   # keyUp
 
     def test_plain_key_no_modifiers_produces_two_events(self) -> None:
-        """Return key with no modifiers: just keyDown, keyUp."""
         events_posted = []
 
         def track_event(pid, event):
@@ -190,8 +192,7 @@ class DiscreteModifierTests(unittest.TestCase):
         self.assertEqual(events_posted[0], (36, True))
         self.assertEqual(events_posted[1], (36, False))
 
-    def test_single_modifier_cmd_c_produces_four_events(self) -> None:
-        """cmd+c: cmd_down, c_down, c_up, cmd_up."""
+    def test_cmd_c_produces_two_compound_events(self) -> None:
         events_posted = []
 
         def track_event(pid, event):
@@ -207,11 +208,10 @@ class DiscreteModifierTests(unittest.TestCase):
         ):
             cg_input._post_keycode_with_modifiers(123, 8, MASK_COMMAND)
 
-        self.assertEqual(len(events_posted), 4)
-        self.assertEqual(events_posted[0], (55, True))   # cmd down
-        self.assertEqual(events_posted[1], (8, True))     # c down
-        self.assertEqual(events_posted[2], (8, False))    # c up
-        self.assertEqual(events_posted[3], (55, False))   # cmd up
+        # 2 compound events — NOT 4 discrete events
+        self.assertEqual(len(events_posted), 2)
+        self.assertEqual(events_posted[0], (8, True))    # keyDown
+        self.assertEqual(events_posted[1], (8, False))   # keyUp
 
 
 class EventSourceIsolationTests(unittest.TestCase):

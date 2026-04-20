@@ -120,37 +120,20 @@ def _post_key_event(pid: int, keycode: int, is_down: bool, flags: int, *, source
 
 
 def _post_keycode_with_modifiers(pid: int, keycode: int, modifiers: int, *, source: Any = None) -> None:
-    """Send a key press with discrete modifier events matching real keyboard behavior.
+    """Send a key press as compound events (modifiers embedded in flags).
 
-    For shift+cmd+s, emits:
-      flagsChanged(shift_down, flags=shift)
-      flagsChanged(cmd_down,   flags=shift|cmd)
-      keyDown(s,               flags=shift|cmd)
-      keyUp(s,                 flags=shift|cmd)
-      flagsChanged(cmd_up,     flags=shift)
-      flagsChanged(shift_up,   flags=0)
+    This is the safe CGEventPostToPid path — modifier flags are set on the
+    keyDown/keyUp events directly, NOT as separate flagsChanged events.
+    Separate flagsChanged via CGEventPostToPid leak to the global modifier
+    state and corrupt the user's keyboard.
+
+    Discrete modifier sequences are only used in deliver_key_events()
+    via the SkyLight path where they don't leak.
     """
-    from app._lib.keys import decompose_modifier_sequence
-
-    mod_sequence = decompose_modifier_sequence(modifiers)
-
-    # Wind up: press each modifier in order
-    for mod_keycode, cumulative_flags in mod_sequence:
-        _post_key_event(pid, mod_keycode, True, cumulative_flags, source=source)
-        time.sleep(_KEY_EVENT_DELAY)
-
-    # Key down/up with full modifier mask
     _post_key_event(pid, keycode, True, modifiers, source=source)
     time.sleep(_KEY_HOLD_DELAY)
     _post_key_event(pid, keycode, False, modifiers, source=source)
     time.sleep(_KEY_EVENT_DELAY)
-
-    # Unwind: release modifiers in reverse order
-    for i, (mod_keycode, _) in enumerate(reversed(mod_sequence)):
-        remaining_idx = len(mod_sequence) - 2 - i
-        remaining_flags = mod_sequence[remaining_idx][1] if remaining_idx >= 0 else 0
-        _post_key_event(pid, mod_keycode, False, remaining_flags, source=source)
-        time.sleep(_KEY_EVENT_DELAY)
 
 
 def _post_unicode_char(pid: int, char: str, *, source: Any = None) -> None:
