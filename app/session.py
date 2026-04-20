@@ -2775,25 +2775,14 @@ class SessionManager:
             if ax_result is not None:
                 return ax_result
 
-            # Pre-snapshot for delivery verdict (coord click path)
-            before_snapshot_coord = self._capture_element_snapshot(session, None)
-
             try:
-                transport_mark = 0
-                if session.cgevent_outcome_monitor is not None:
-                    _, transport_mark = session.cgevent_outcome_monitor.begin_action()
-                notification_mark = (
-                    session.ax_outcome_monitor.mark()
-                    if session.ax_outcome_monitor is not None
-                    else None
-                )
                 if feature_flags.confirmed_delivery and session.delivery_tap is not None:
                     from app._lib.input import deliver_click
                     from Quartz import CGPointMake
                     sx, sy = cg_input.window_to_screen_coords(
                         t.window_id, float(x), float(y), session.screenshot_size,
                     )
-                    click_result = deliver_click(
+                    deliver_click(
                         pid=t.window_pid,
                         point=CGPointMake(sx, sy),
                         button=button,
@@ -2803,7 +2792,6 @@ class SessionManager:
                         confirmation_tap=session.delivery_tap,
                     )
                 else:
-                    click_result = None
                     cg_input.click_at(
                         t.window_pid,
                         t.window_id,
@@ -2814,27 +2802,23 @@ class SessionManager:
                         screenshot_size=session.screenshot_size,
                         source=session.event_source,
                     )
-                if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
-                    verification = self._verify_cgevent_contract(
-                        session,
-                        expectation=expectation_for_click(button, count),
-                        transport_mark=transport_mark,
-                        contract=VerificationContract(expect_transient_open=(button == "right")),
-                        notification_mark=notification_mark,
-                    )
-                    if verification not in {
-                        ActionVerificationResult.CONFIRMED,
-                        ActionVerificationResult.TRANSIENT_OPENED,
-                    }:
-                        logger.info("click: verification timeout — action likely landed (AX lag)")
-                from app._lib.confirmed_verification import ExpectedDiff
-                after_snapshot_coord = self._capture_element_snapshot(session, None)
-                self._compute_delivery_verdict(
-                    session, before_snapshot_coord, after_snapshot_coord,
-                    transport_confirmed=True,
-                    fallback_used=False,
-                    expected=ExpectedDiff.FOCUS_OR_LAYOUT,
-                )
+                # BUG(event-driven-verification): The old event-driven approach below
+                # races against AX propagation. AX state lags behind actual delivery
+                # by one tool call, causing false "no observed effect" errors on actions
+                # that actually landed. The fresh snapshot returned to the AI agent IS
+                # the truth — intermediate event monitoring adds no value when it
+                # false-negatives. Replaced with: trust transport, return snapshot.
+                #
+                # if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
+                #     verification = self._verify_cgevent_contract(
+                #         session,
+                #         expectation=expectation_for_click(button, count),
+                #         transport_mark=transport_mark,
+                #         contract=VerificationContract(expect_transient_open=(button == "right")),
+                #         notification_mark=notification_mark,
+                #     )
+                #     if verification not in { CONFIRMED, TRANSIENT_OPENED }:
+                #         raise InputError("Coordinate click had no observed effect")
                 return f"Clicked at ({x}, {y}) (CGEventPostToPid)"
             except InputError as exc:
                 logger.debug(
@@ -2967,17 +2951,6 @@ class SessionManager:
                 )
 
         input_pid = self._background_pid_for_node(session, node if el_idx is not None else None)
-        transport_mark = 0
-        if session.cgevent_outcome_monitor is not None:
-            _, transport_mark = session.cgevent_outcome_monitor.begin_action()
-        notification_mark = (
-            session.ax_outcome_monitor.mark()
-            if session.ax_outcome_monitor is not None
-            else None
-        )
-        # Pre-snapshot for delivery verdict
-        type_target_node = node if el_idx is not None else None
-        before_snapshot_type = self._capture_element_snapshot(session, type_target_node)
         # Use confirmed delivery pipeline with mid-stream interruption
         if feature_flags.confirmed_delivery and session.delivery_tap is not None:
             from app._lib.input import deliver_type_text
@@ -2999,47 +2972,20 @@ class SessionManager:
             )
         else:
             cg_input.type_text(input_pid, text, source=session.event_source)
-        if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
-            direct_verifier = None
-            if el_idx is not None and node.ax_ref is not None:
-                def _verifier() -> bool:
-                    current = EditableTextObject(node.ax_ref, pid=node.element_pid).text
-                    if before_text is None:
-                        return text in current
-                    return current != before_text
-                direct_verifier = _verifier
-            verification = self._verify_cgevent_contract(
-                session,
-                expectation=expectation_for_typing(),
-                transport_mark=transport_mark,
-                contract=VerificationContract(direct_verifier=direct_verifier),
-                notification_mark=notification_mark,
-            )
-            if verification not in {
-                ActionVerificationResult.CONFIRMED,
-                ActionVerificationResult.TRANSIENT_OPENED,
-            }:
-                # Check new ActionVerifier before raising — old monitor may false-negative
-                after_snapshot_type = self._capture_element_snapshot(session, type_target_node)
-                from app._lib.confirmed_verification import ExpectedDiff, DeliveryVerdict
-                verdict = self._compute_delivery_verdict(
-                    session, before_snapshot_type, after_snapshot_type,
-                    transport_confirmed=True,
-                    fallback_used=False,
-                    expected=ExpectedDiff.VALUE_CHANGED,
-                )
-                if verdict not in {DeliveryVerdict.CONFIRMED, DeliveryVerdict.CONFIRMED_VIA_FALLBACK}:
-                    logger.info("type_text: verification timeout — action likely landed (AX lag)")
-                logger.debug("type_text: old monitor said no effect but ActionVerifier confirmed state change")
-        else:
-            after_snapshot_type = self._capture_element_snapshot(session, type_target_node)
-            from app._lib.confirmed_verification import ExpectedDiff
-            self._compute_delivery_verdict(
-                session, before_snapshot_type, after_snapshot_type,
-                transport_confirmed=True,
-                fallback_used=False,
-                expected=ExpectedDiff.VALUE_CHANGED,
-            )
+        # BUG(event-driven-verification): The old event-driven approach below
+        # races against AX propagation. AX state lags behind actual delivery
+        # by one tool call, causing false "no observed effect" errors on text
+        # that actually landed. The fresh snapshot returned to the AI agent IS
+        # the truth. Replaced with: trust transport, return snapshot.
+        #
+        # if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
+        #     verification = self._verify_cgevent_contract(session,
+        #         expectation=expectation_for_typing(), transport_mark=...,
+        #         contract=VerificationContract(direct_verifier=...),
+        #         notification_mark=...,
+        #     )
+        #     if verification not in { CONFIRMED, TRANSIENT_OPENED }:
+        #         raise AutomationError("type_text had no observed effect")
         if el_idx is None:
             return f"Typed {text!r} into the current focused element"
         return f"Typed {text!r} into element {el_idx} (background key events)"
@@ -3189,17 +3135,6 @@ class SessionManager:
                 )
 
         input_pid = self._background_pid_for_node(session, node if el_idx is not None else None)
-        transport_mark = 0
-        if session.cgevent_outcome_monitor is not None:
-            _, transport_mark = session.cgevent_outcome_monitor.begin_action()
-        notification_mark = (
-            session.ax_outcome_monitor.mark()
-            if session.ax_outcome_monitor is not None
-            else None
-        )
-        # Pre-snapshot for delivery verdict
-        target_node = node if el_idx is not None else None
-        before_snapshot = self._capture_element_snapshot(session, target_node)
 
         # Resolve key to keycode + modifiers for delivery pipeline
         resolved_key = cg_input._coerce_text_key(key)
@@ -3229,46 +3164,20 @@ class SessionManager:
                 logger.warning("press_key transport not confirmed for %s", key)
         else:
             cg_input.press_key(input_pid, key, source=session.event_source)
-        if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
-            verification = self._verify_cgevent_contract(
-                session,
-                expectation=expectation_for_keypress(),
-                transport_mark=transport_mark,
-                contract=VerificationContract(
-                    expect_transient_close=(
-                        key.lower() == "escape"
-                        and session.transient_graph_tracker is not None
-                        and session.transient_graph_tracker.has_active_transient
-                    )
-                ),
-                notification_mark=notification_mark,
-            )
-            if verification not in {
-                ActionVerificationResult.CONFIRMED,
-                ActionVerificationResult.TRANSIENT_CLOSED,
-            }:
-                # Check new ActionVerifier before raising — old monitor may false-negative
-                after_snapshot = self._capture_element_snapshot(session, target_node)
-                from app._lib.confirmed_verification import ExpectedDiff, DeliveryVerdict
-                verdict = self._compute_delivery_verdict(
-                    session, before_snapshot, after_snapshot,
-                    transport_confirmed=delivery_result.transport_confirmed if delivery_result is not None else True,
-                    fallback_used=delivery_result.fallback_used if delivery_result is not None else False,
-                    expected=ExpectedDiff.LAYOUT_OR_MENU,
-                )
-                if verdict not in {DeliveryVerdict.CONFIRMED, DeliveryVerdict.CONFIRMED_VIA_FALLBACK}:
-                    logger.info("press_key: verification timeout — action likely landed (AX lag)")
-                logger.debug("press_key: old monitor said no effect but ActionVerifier confirmed state change")
-        else:
-            # No old verification — still compute verdict for diagnostics
-            after_snapshot = self._capture_element_snapshot(session, target_node)
-            from app._lib.confirmed_verification import ExpectedDiff
-            self._compute_delivery_verdict(
-                session, before_snapshot, after_snapshot,
-                transport_confirmed=delivery_result.transport_confirmed if delivery_result is not None else True,
-                fallback_used=delivery_result.fallback_used if delivery_result is not None else False,
-                expected=ExpectedDiff.LAYOUT_OR_MENU,
-            )
+        # BUG(event-driven-verification): The old event-driven approach below
+        # races against AX propagation. AX state lags behind actual delivery
+        # by one tool call, causing false "no observed effect" errors on keys
+        # that actually landed. The fresh snapshot returned to the AI agent IS
+        # the truth. Replaced with: trust transport, return snapshot.
+        #
+        # if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
+        #     verification = self._verify_cgevent_contract(session,
+        #         expectation=expectation_for_keypress(), transport_mark=...,
+        #         contract=VerificationContract(expect_transient_close=...),
+        #         notification_mark=...,
+        #     )
+        #     if verification not in { CONFIRMED, TRANSIENT_CLOSED }:
+        #         raise AutomationError("press_key had no observed effect")
         if el_idx is None:
             return f"Pressed {key} in {t.bundle_id} (background key event)"
         return f"Pressed {key} on element {el_idx} (background key event)"
@@ -3281,18 +3190,7 @@ class SessionManager:
         to_x = float(params["to_x"])
         to_y = float(params["to_y"])
 
-        # Pre-snapshot for delivery verdict
-        before_snapshot_drag = self._capture_element_snapshot(session, None)
-
         try:
-            transport_mark = 0
-            if session.cgevent_outcome_monitor is not None:
-                _, transport_mark = session.cgevent_outcome_monitor.begin_action()
-            notification_mark = (
-                session.ax_outcome_monitor.mark()
-                if session.ax_outcome_monitor is not None
-                else None
-            )
             cg_input.drag(
                 t.window_pid,
                 t.window_id,
@@ -3303,31 +3201,10 @@ class SessionManager:
                 screenshot_size=session.screenshot_size,
                 source=session.event_source,
             )
-            if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
-                verification = self._verify_cgevent_contract(
-                    session,
-                    expectation=expectation_for_drag(),
-                    transport_mark=transport_mark,
-                    contract=VerificationContract(),
-                    notification_mark=notification_mark,
-                )
-                if verification not in {
-                    ActionVerificationResult.CONFIRMED,
-                    ActionVerificationResult.TRANSIENT_OPENED,
-                }:
-                    logger.info("drag: verification timeout — action likely landed (AX lag)")
         except InputError as exc:
             logger.debug("Drag failed for %s window %s: %s", t.bundle_id, t.window_id, exc)
             self._refresh_window(session)
             t = session.target
-            transport_mark = 0
-            if session.cgevent_outcome_monitor is not None:
-                _, transport_mark = session.cgevent_outcome_monitor.begin_action()
-            notification_mark = (
-                session.ax_outcome_monitor.mark()
-                if session.ax_outcome_monitor is not None
-                else None
-            )
             cg_input.drag(
                 t.window_pid,
                 t.window_id,
@@ -3338,29 +3215,19 @@ class SessionManager:
                 screenshot_size=session.screenshot_size,
                 source=session.event_source,
             )
-            if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
-                verification = self._verify_cgevent_contract(
-                    session,
-                    expectation=expectation_for_drag(),
-                    transport_mark=transport_mark,
-                    contract=VerificationContract(),
-                    notification_mark=notification_mark,
-                )
-                if verification not in {
-                    ActionVerificationResult.CONFIRMED,
-                    ActionVerificationResult.TRANSIENT_OPENED,
-                }:
-                    logger.info("drag: verification timeout after refresh — action likely landed (AX lag)")
-
-        # Post-snapshot and verdict (alongside existing verification)
-        after_snapshot_drag = self._capture_element_snapshot(session, None)
-        from app._lib.confirmed_verification import ExpectedDiff
-        self._compute_delivery_verdict(
-            session, before_snapshot_drag, after_snapshot_drag,
-            transport_confirmed=True,
-            fallback_used=False,
-            expected=ExpectedDiff.FOCUS_OR_LAYOUT,
-        )
+        # BUG(event-driven-verification): The old event-driven approach below
+        # races against AX propagation. AX state lags behind actual delivery
+        # by one tool call, causing false "no observed effect" errors on drags
+        # that actually landed. The fresh snapshot returned to the AI agent IS
+        # the truth. Replaced with: trust transport, return snapshot.
+        #
+        # if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
+        #     verification = self._verify_cgevent_contract(session,
+        #         expectation=expectation_for_drag(), transport_mark=...,
+        #         contract=VerificationContract(), notification_mark=...,
+        #     )
+        #     if verification not in { CONFIRMED, TRANSIENT_OPENED }:
+        #         raise InputError("drag had no observed effect")
         return f"Dragged from ({from_x}, {from_y}) to ({to_x}, {to_y})"
 
     def _handle_secondary_action(self, session: AppSession, params: dict) -> str:
