@@ -552,17 +552,60 @@ Layer 3 ─ Platform Backend      app/_lib/             One module per macOS sub
 
 <br>
 
-## Supported Apps
+## Cross-App Test Results
+
+Tested across 4 apps and all 9 tools. ~30 tool invocations, zero crashes, zero focus theft, zero cursor hijacking.
+
+### App Compatibility
+
+| App | Type | AX Tree | Notes |
+|-----|------|---------|-------|
+| **TextEdit** | Native Cocoa | Rich (50+ elements) | All 9 tools work. Best overall compatibility. |
+| **VS Code** | Electron | Very rich (900+ elements) | click, get_app_state, press_key work. set_value rejected (Electron limitation). |
+| **Terminal** | Native Cocoa | Sparse | type_text and press_key work. Limited AX exposure (shell text area only). |
+| **Finder** | Native Cocoa | Sparse (desktop) | get_app_state works. Desktop-only view has minimal interactive elements. |
+| **Macs Fan Control** | Qt | None | get_app_state fails gracefully. AX window not resolvable. |
+
+### Tool Results
+
+| Tool | Native Cocoa | Electron | Notes |
+|------|-------------|----------|-------|
+| `list_apps` | PASS | PASS | Returns all running apps with window IDs, PIDs, bounds |
+| `get_app_state` | PASS | PASS | AX tree + screenshot on every call. Fails gracefully on Qt apps with no AX |
+| `click` | PASS | PASS | Element clicks work cross-app. Double-click fails on Electron |
+| `type_text` | PASS | PASS | Delivered to correct process even with multiple apps. macOS auto-correct can mangle text |
+| `press_key` | PASS | PASS | Cmd+A, Cmd+Z, Shift+End all land. Some complex shortcuts don't trigger in background |
+| `set_value` | PASS | FAIL | Instant on Cocoa (replaced entire documents). Electron rejects AX value setting |
+| `scroll` | PASS | PARTIAL | Works on Cocoa elements. Electron webviews block AX scroll |
+| `drag` | PASS | &mdash; | Coordinates-based, worked for precise UI manipulation (ruler markers) |
+| `perform_secondary_action` | PASS | &mdash; | Zoom, fullscreen work. Raise blocked by design (would steal focus) |
+
+### What works well
+
+- **AX element clicks** are the most reliable cross-app interaction
+- **set_value** is instant on Native Cocoa &mdash; replaces entire document contents without typing
+- **type_text** delivers to the correct process even with multiple apps running
+- **press_key** handles complex modifiers (Cmd+A, Cmd+Z, Shift+End) reliably
+- **Screenshots** capture every window correctly regardless of visibility
+
+### Known Limitations
+
+- **Electron set_value** &mdash; VS Code and other Electron apps reject AX value setting. Use type_text instead
+- **Electron double-click** &mdash; click_count > 1 fails on some Electron elements
+- **Electron scroll** &mdash; webview elements don't expose scroll to AX. Coordinate-based scrolling needed
+- **macOS auto-correct** &mdash; type_text triggers the system spell checker, which can mangle text
+- **Qt apps** &mdash; apps with zero AX exposure (like Macs Fan Control) can't be automated
+- **Background shortcuts** &mdash; some complex key combos don't trigger when sent via background events
+
+### Supported App Types
 
 mac-cua works with any macOS application that exposes an accessibility tree:
 
-- **Native Cocoa** &mdash; Finder, Safari, Music, System Settings, Notes, Calendar
-- **Electron** &mdash; VS Code, Slack, Discord, Notion
+- **Native Cocoa** &mdash; Finder, Safari, Music, System Settings, Notes, Calendar, TextEdit
+- **Electron** &mdash; VS Code, Slack, Discord, Notion (click + type_text work; set_value limited)
 - **Chromium** &mdash; Chrome, Arc, Edge
 - **Java** &mdash; JetBrains IDEs (IntelliJ, PyCharm, WebStorm)
-- **Qt** &mdash; Various Qt-based applications
-
-Apps with minimal accessibility exposure fall back to screenshot-based coordinate interaction automatically.
+- **Qt** &mdash; Limited. Falls back to screenshot-based coordinate interaction
 
 <br>
 
