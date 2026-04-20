@@ -43,3 +43,6 @@ htmlcov/
 .env
 .env.local
 *.pem
+
+# Git worktrees
+.worktrees/
