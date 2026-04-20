@@ -23,7 +23,7 @@ class InputTests(unittest.TestCase):
             cg_input.press_key(321, "o")
 
         parse_mock.assert_called_once_with("o")
-        post_key_mock.assert_called_once_with(321, 31, 0)
+        post_key_mock.assert_called_once_with(321, 31, 0, source=None)
 
     def test_press_key_routes_named_symbol_to_keycode_path(self) -> None:
         with (
@@ -33,7 +33,7 @@ class InputTests(unittest.TestCase):
             cg_input.press_key(321, "slash")
 
         parse_mock.assert_called_once_with("/")
-        post_key_mock.assert_called_once_with(321, 44, 0)
+        post_key_mock.assert_called_once_with(321, 44, 0, source=None)
 
     def test_press_key_uses_raw_keycodes_for_shortcuts(self) -> None:
         with (
@@ -43,7 +43,7 @@ class InputTests(unittest.TestCase):
             cg_input.press_key(123, "cmd+o")
 
         parse_mock.assert_called_once_with("cmd+o")
-        post_key_mock.assert_called_once_with(123, 31, 99)
+        post_key_mock.assert_called_once_with(123, 31, 99, source=None)
 
     def test_post_keycode_with_modifiers_sends_chorded_key_events(self) -> None:
         key_down = object()
@@ -126,7 +126,7 @@ class InputTests(unittest.TestCase):
             cg_input.type_text(456, "A")
 
         parse_mock.assert_called_once_with("A")
-        post_key_mock.assert_called_once_with(456, 0, 0)
+        post_key_mock.assert_called_once_with(456, 0, 0, source=None)
         post_unicode_mock.assert_not_called()
 
     def test_type_text_falls_back_to_unicode_for_unmapped_characters(self) -> None:
@@ -140,7 +140,70 @@ class InputTests(unittest.TestCase):
 
         parse_mock.assert_called_once_with("🙂")
         post_key_mock.assert_not_called()
-        post_unicode_mock.assert_called_once_with(456, "🙂")
+        post_unicode_mock.assert_called_once_with(456, "🙂", source=None)
+
+
+class EventSourceIsolationTests(unittest.TestCase):
+    def test_post_key_event_uses_provided_source(self) -> None:
+        custom_source = object()
+        key_event = object()
+
+        with (
+            patch(
+                "app._lib.input.CGEventCreateKeyboardEvent",
+                return_value=key_event,
+            ) as create_mock,
+            patch("app._lib.input.CGEventSetFlags"),
+            patch("app._lib.input.CGEventPostToPid"),
+        ):
+            cg_input._post_key_event(123, 31, True, 0, source=custom_source)
+
+        create_mock.assert_called_once_with(custom_source, 31, True)
+
+    def test_post_key_event_falls_back_to_default_source(self) -> None:
+        key_event = object()
+
+        with (
+            patch(
+                "app._lib.input.CGEventCreateKeyboardEvent",
+                return_value=key_event,
+            ) as create_mock,
+            patch("app._lib.input.CGEventSetFlags"),
+            patch("app._lib.input.CGEventPostToPid"),
+        ):
+            cg_input._post_key_event(123, 31, True, 0)
+
+        create_mock.assert_called_once_with(cg_input._source, 31, True)
+
+    def test_post_click_uses_provided_source(self) -> None:
+        custom_source = object()
+        move = object()
+        down = object()
+        up = object()
+
+        with (
+            patch(
+                "app._lib.input.CGEventCreateMouseEvent",
+                side_effect=[move, down, up],
+            ) as create_mock,
+            patch("app._lib.input.CGEventSetIntegerValueField"),
+            patch("app._lib.input.CGEventSetDoubleValueField"),
+            patch("app._lib.input.CGEventPostToPid"),
+            patch("app._lib.input.time.sleep"),
+        ):
+            cg_input._post_click(456, sentinel.point, "left", 1, source=custom_source)
+
+        # All three events should use custom_source
+        for call_args in create_mock.call_args_list:
+            self.assertIs(call_args[0][0], custom_source)
+
+    def test_create_event_source_returns_private_source(self) -> None:
+        fake_source = object()
+        with patch("app._lib.input.CGEventSourceCreate", return_value=fake_source) as create_mock:
+            result = cg_input.create_event_source()
+
+        create_mock.assert_called_once_with(cg_input.kCGEventSourceStatePrivate)
+        self.assertIs(result, fake_source)
 
 
 if __name__ == "__main__":
