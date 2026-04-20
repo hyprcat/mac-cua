@@ -34,7 +34,7 @@ mac-cua ships two branches. Pick the one that matches your needs.
 
 | | **`release`** | **`confirmed-delivery-pipeline`** |
 |---|---|---|
-| **Stability** | Production-tested, stable | Experimental, actively developed |
+| **Stability** | Base implementation, fewer moving parts | Experimental, actively developed |
 | **Input delivery** | `CGEventPostToPid` with compound modifier events | Confirmed delivery pipeline: per-event transport confirmation via on-demand CGEventTap, SkyLight SPI fallback, micro-activation retry |
 | **Event source** | Shared global `CGEventSource` | Per-session isolated `CGEventSource` (no cross-session state leakage) |
 | **Verification** | Dual-monitor system (CGEvent transport + AX outcome) | Snapshot-based: trust transport, return fresh AX tree + screenshot as ground truth. Old event-driven monitors removed (raced against AX propagation, caused false negatives) |
@@ -45,7 +45,9 @@ mac-cua ships two branches. Pick the one that matches your needs.
 | **Tests** | 216 passing | 270 passing |
 | **Known issues** | Event-driven verification produces false "no observed effect" errors when AX lags | Event taps add brief overhead during action delivery (~50ms). SkyLight SPIs may not be available on all macOS versions |
 
-**Use `release`** if you want proven stability and don't need cross-app Electron/Java/Qt reliability improvements.
+Both branches are early-stage software. Contributors are welcome on either branch -- see [Contributing](#contributing) below.
+
+**Use `release`** if you want the base implementation with fewer moving parts.
 
 **Use `confirmed-delivery-pipeline`** if you want the latest input delivery fixes, elimination of false-negative verification errors, and per-session isolation.
 
