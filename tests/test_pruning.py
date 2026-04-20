@@ -22,6 +22,10 @@ import unittest
 from app._lib.pruning import (
     _build_tree_index,
     _build_tree_index_excluding,
+    collapse_row_children_into_row,
+    collapse_button_title_children,
+    drop_empty_outline_rows,
+    flatten_outline_rows,
     merge_labels_with_controls,
     strip_actions,
     collapse_into_interactive_parent,
@@ -31,6 +35,7 @@ from app._lib.pruning import (
     unwrap_single_child_groups,
     combine_text_siblings,
     prune,
+    prune_for_codex_tree,
     prune_calendar_event_details,
     shorten_urls,
     URLShortenerConfig,
@@ -173,6 +178,218 @@ class TestCollapseIntoInteractiveParent(unittest.TestCase):
         removed = collapse_into_interactive_parent(nodes, children_map)
         self.assertEqual(removed, {1, 2, 3})
         self.assertEqual(nodes[0].label, "Hello World")
+
+
+class TestCollapseRowChildrenIntoRow(unittest.TestCase):
+    def test_row_promotes_leaf_text_and_image_to_row(self) -> None:
+        nodes = [
+            _node(0, role="AXRow", label=None, depth=0),
+            _node(1, role="AXImage", label=None, depth=1, description="Grid view"),
+            _node(2, role="AXStaticText", label="New", depth=1),
+        ]
+        children_map, _ = _build_tree_index(nodes)
+
+        removed = collapse_row_children_into_row(nodes, children_map)
+
+        self.assertEqual(removed, {1, 2})
+        self.assertEqual(nodes[0].description, "Grid view")
+        self.assertEqual(nodes[0].value, "New")
+
+    def test_row_without_icon_uses_text_as_label(self) -> None:
+        nodes = [
+            _node(0, role="AXRow", label=None, depth=0),
+            _node(1, role="AXStaticText", label="Replay 2024", depth=1),
+        ]
+        children_map, _ = _build_tree_index(nodes)
+
+        removed = collapse_row_children_into_row(nodes, children_map)
+
+        self.assertEqual(removed, {1})
+        self.assertEqual(nodes[0].label, "Replay 2024")
+
+    def test_non_row_cells_keep_nested_text(self) -> None:
+        nodes = [
+            _node(0, role="AXCell", label=None, depth=0, description="Drake"),
+            _node(1, role="AXStaticText", label="Drake Artist", depth=1),
+        ]
+
+        pruned = prune_for_codex_tree(nodes)
+
+        self.assertEqual([node.ax_role for node in pruned], ["AXCell", "AXStaticText"])
+        self.assertEqual(pruned[0].description, "Drake")
+        self.assertEqual(pruned[1].label, "Drake Artist")
+
+    def test_codex_pruning_keeps_scrollbars_splitters_and_actions(self) -> None:
+        nodes = [
+            _node(0, role="AXWindow", label="Music", depth=0, actions=["AXRaise"]),
+            _node(1, role="AXSplitGroup", label=None, depth=1),
+            _node(2, role="AXScrollArea", label=None, depth=2, actions=["AXScrollUpByPage", "AXScrollDownByPage"]),
+            _node(3, role="AXScrollBar", label=None, depth=3, value="0"),
+            _node(4, role="AXValueIndicator", label=None, depth=4, value="0"),
+            _node(5, role="AXSplitter", label=None, depth=2, value="208"),
+            _node(6, role="AXButton", label="Go Back", depth=2, actions=["AXMoveNext", "AXRemoveFromToolbar"]),
+            _node(7, role="AXUnknown", label="Browse Categories", depth=2),
+        ]
+
+        pruned = prune_for_codex_tree(nodes)
+        ax_roles = [node.ax_role for node in pruned]
+
+        self.assertIn("AXSplitGroup", ax_roles)
+        self.assertIn("AXScrollBar", ax_roles)
+        self.assertIn("AXSplitter", ax_roles)
+        self.assertIn("AXUnknown", ax_roles)
+        button = next(node for node in pruned if node.ax_role == "AXButton")
+        self.assertEqual(button.secondary_actions, ["AXMoveNext", "AXRemoveFromToolbar"])
+
+    def test_outline_rows_flatten_to_direct_row_labels(self) -> None:
+        nodes = [
+            _node(0, role="AXOutline", label=None, depth=0, description="Sidebar"),
+            _node(1, role="AXRow", label=None, depth=1),
+            _node(2, role="AXCell", label=None, depth=2),
+            _node(3, role="AXImage", label=None, depth=3, description="playlist"),
+            _node(4, role="AXStaticText", label="Replay 2024", depth=3),
+        ]
+        nodes[1].subrole = "AXOutlineRow"
+        children_map, _ = _build_tree_index(nodes)
+
+        removed = flatten_outline_rows(nodes, children_map)
+
+        self.assertEqual(removed, {2, 3, 4})
+        self.assertEqual(nodes[1].description, "playlist")
+        self.assertEqual(nodes[1].value, "Replay 2024")
+
+    def test_outline_row_identical_icon_and_text_uses_label(self) -> None:
+        nodes = [
+            _node(0, role="AXRow", label=None, depth=0),
+            _node(1, role="AXCell", label=None, depth=1),
+            _node(2, role="AXImage", label=None, depth=2, description="Search"),
+            _node(3, role="AXStaticText", label="Search", depth=2),
+        ]
+        nodes[0].subrole = "AXOutlineRow"
+        children_map, _ = _build_tree_index(nodes)
+
+        removed = flatten_outline_rows(nodes, children_map)
+
+        self.assertEqual(removed, {1, 2, 3})
+        self.assertEqual(nodes[0].label, "Search")
+        self.assertIsNone(nodes[0].description)
+        self.assertIsNone(nodes[0].value)
+
+    def test_outline_row_preserves_existing_label_as_description_and_merges_disclosure(self) -> None:
+        nodes = [
+            _node(0, role="AXRow", label="Edit", depth=0, states=["selectable"]),
+            _node(1, role="AXCell", label=None, depth=1),
+            _node(2, role="AXDisclosureTriangle", label=None, depth=2, states=["expanded"], actions=["AXCollapse"]),
+            _node(3, role="AXStaticText", label="Playlists", depth=2),
+        ]
+        nodes[0].subrole = "AXOutlineRow"
+        children_map, _ = _build_tree_index(nodes)
+
+        removed = flatten_outline_rows(nodes, children_map)
+
+        self.assertEqual(removed, {1, 2, 3})
+        self.assertEqual(nodes[0].description, "Edit")
+        self.assertEqual(nodes[0].value, "Playlists")
+        self.assertIn("expanded", nodes[0].states)
+        self.assertIn("AXCollapse", nodes[0].secondary_actions)
+
+    def test_outline_row_promotes_button_text_to_label(self) -> None:
+        nodes = [
+            _node(0, role="AXRow", label=None, depth=0, states=["selectable"]),
+            _node(1, role="AXCell", label=None, depth=1),
+            _node(2, role="AXStaticText", label="Library", depth=2),
+            _node(3, role="AXButton", label="Edit", depth=2),
+        ]
+        nodes[0].subrole = "AXOutlineRow"
+        children_map, _ = _build_tree_index(nodes)
+
+        removed = flatten_outline_rows(nodes, children_map)
+
+        self.assertEqual(removed, {1, 2, 3})
+        self.assertEqual(nodes[0].label, "Edit")
+        self.assertEqual(nodes[0].value, "Library")
+
+    def test_outline_row_uses_static_text_description_when_present(self) -> None:
+        nodes = [
+            _node(0, role="AXRow", label=None, depth=0, states=["selectable"]),
+            _node(1, role="AXCell", label=None, depth=1),
+            _node(2, role="AXStaticText", label="1", depth=2, description="Software Update Available, 1 new item"),
+        ]
+        nodes[0].subrole = "AXOutlineRow"
+        children_map, _ = _build_tree_index(nodes)
+
+        removed = flatten_outline_rows(nodes, children_map)
+
+        self.assertEqual(removed, {1, 2})
+        self.assertEqual(nodes[0].label, "1")
+        self.assertEqual(nodes[0].description, "Software Update Available, 1 new item")
+
+    def test_drop_empty_outline_rows_removes_icon_only_wrappers(self) -> None:
+        nodes = [
+            _node(0, role="AXRow", label=None, depth=0, states=["selectable"]),
+            _node(1, role="AXCell", label=None, depth=1),
+            _node(2, role="AXGroup", label=None, depth=2),
+            _node(3, role="AXRow", label="General", depth=0, states=["selectable"]),
+        ]
+        nodes[0].subrole = "AXOutlineRow"
+        nodes[3].subrole = "AXOutlineRow"
+        children_map, _ = _build_tree_index(nodes)
+
+        removed = drop_empty_outline_rows(nodes, children_map)
+
+        self.assertEqual(removed, {0, 1, 2})
+
+
+class TestCollapseButtonTitleChildren(unittest.TestCase):
+    def test_collapses_outer_button_with_title_button_child(self) -> None:
+        nodes = [
+            _node(0, role="AXButton", label=None, depth=0, description="Apple", states=["disabled"]),
+            _node(1, role="AXImage", label=None, depth=1),
+            _node(2, role="AXButton", label=None, depth=1, description="Apple", value="Apple"),
+        ]
+        children_map, _ = _build_tree_index(nodes)
+
+        removed = collapse_button_title_children(nodes, children_map)
+
+        self.assertEqual(removed, {1, 2})
+        self.assertEqual(nodes[0].label, "Apple")
+
+    def test_codex_pruning_keeps_disabled_sections(self) -> None:
+        nodes = [
+            _node(0, role="AXCollection", label=None, depth=0),
+            _node(1, role="AXGroup", label="Top Picks for You", depth=1, states=["disabled"]),
+            _node(2, role="AXStaticText", label="R&B Now", depth=2),
+        ]
+
+        pruned = prune_for_codex_tree(nodes)
+
+        self.assertEqual([node.ax_role for node in pruned], ["AXCollection", "AXGroup", "AXStaticText"])
+
+    def test_codex_pruning_keeps_descriptive_groups_but_skips_empty_hosting_views(self) -> None:
+        nodes = [
+            _node(0, role="AXGroup", label=None, depth=0, description=None),
+            _node(1, role="AXGroup", label=None, depth=1, description="Mini Player"),
+            _node(2, role="AXButton", label="Play", depth=2),
+        ]
+        nodes[0].subrole = "AXHostingView"
+
+        pruned = prune_for_codex_tree(nodes)
+
+        self.assertEqual([node.ax_role for node in pruned], ["AXGroup", "AXButton"])
+        self.assertEqual(pruned[0].description, "Mini Player")
+
+    def test_codex_pruning_skips_empty_single_child_group_even_with_id(self) -> None:
+        nodes = [
+            _node(0, role="AXGroup", label=None, depth=0, description="Mini Player"),
+            _node(1, role="AXGroup", label=None, depth=1, description=None),
+            _node(2, role="AXButton", label="Show Now Playing", depth=2),
+        ]
+        nodes[1].ax_id = "Music.miniPlayer.metadataRegion[state=empty]"
+
+        pruned = prune_for_codex_tree(nodes)
+
+        self.assertEqual([node.ax_role for node in pruned], ["AXGroup", "AXButton"])
+        self.assertEqual(pruned[1].label, "Show Now Playing")
 
 
 # ---------------------------------------------------------------------------
@@ -517,6 +734,20 @@ class TestBuildTreeIndexExcluding(unittest.TestCase):
         # Node 2 at depth 2 has no parent at depth 1 in the included set,
         # so it falls through to its depth-based parent
         self.assertNotIn(1, children)
+
+    def test_reparents_through_excluded_sibling_wrapper_chain(self) -> None:
+        nodes = [
+            _node(0, role="AXWindow", label="Music", depth=0),
+            _node(1, role="AXScrollBar", label=None, depth=1),
+            _node(2, role="AXValueIndicator", label=None, depth=2),
+            _node(3, role="AXGroup", label=None, depth=1),  # excluded wrapper
+            _node(4, role="AXGroup", label="Mini Player", depth=2),
+        ]
+
+        children, parent = _build_tree_index_excluding(nodes, {3})
+
+        self.assertEqual(parent[4], 0)
+        self.assertEqual(children[0], [1, 4])
 
 
 # ---------------------------------------------------------------------------

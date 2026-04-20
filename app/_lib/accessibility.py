@@ -27,6 +27,7 @@ from ApplicationServices import (
     kAXSizeAttribute,
     kAXValueAttribute,
     kAXChildrenAttribute,
+    kAXParentAttribute,
     kAXSubroleAttribute,
     kAXIdentifierAttribute,
     kAXEnabledAttribute,
@@ -50,6 +51,9 @@ _BATCH_ATTRS = [
     kAXTitleAttribute,
     kAXDescriptionAttribute,
     kAXValueAttribute,
+    "AXValueDescription",
+    "AXPlaceholderValue",
+    "AXHelp",
     kAXSubroleAttribute,
     kAXIdentifierAttribute,
     kAXRoleDescriptionAttribute,
@@ -82,6 +86,70 @@ _STATE_MAP = {
     kAXSelectedAttribute: ("selected", False),
     kAXExpandedAttribute: ("expanded", False),
     kAXFocusedAttribute: ("focused", False),
+}
+
+_SUBROLE_DISPLAY_OVERRIDES = {
+    "AXStandardWindow": "standard window",
+    "AXCollectionList": "collection",
+    "AXSectionList": "section",
+    "AXSearchField": "search text field",
+    "AXOutlineRow": "row",
+    "AXCloseButton": "close button",
+    "AXMinimizeButton": "minimise button",
+    "AXFullScreenButton": "full screen button",
+    "AXIncrementArrow": "increment arrow button",
+    "AXDecrementArrow": "decrement arrow button",
+    "AXIncrementPage": "increment page button",
+    "AXDecrementPage": "decrement page button",
+}
+
+_ROLE_DISPLAY_OVERRIDES = {
+    "AXApplication": "application",
+    "AXBusyIndicator": "busy indicator",
+    "AXButton": "button",
+    "AXCell": "cell",
+    "AXCheckBox": "checkbox",
+    "AXCollection": "collection",
+    "AXDialog": "dialog",
+    "AXDisclosureTriangle": "disclosure triangle",
+    "AXGroup": "container",
+    "AXHeading": "heading",
+    "AXImage": "image",
+    "AXIncrementor": "incrementor",
+    "AXLayoutArea": "layout area",
+    "AXLink": "link",
+    "AXList": "list",
+    "AXMenu": "menu",
+    "AXMenuBar": "menu bar",
+    "AXMenuBarItem": "menu bar item",
+    "AXMenuButton": "menu button",
+    "AXMenuItem": "menu item",
+    "AXOutline": "outline",
+    "AXPopUpButton": "popup button",
+    "AXProgressIndicator": "progress indicator",
+    "AXRadioButton": "radio button",
+    "AXRow": "row",
+    "AXScrollArea": "scroll area",
+    "AXScrollBar": "scroll bar",
+    "AXSlider": "slider",
+    "AXSplitGroup": "split group",
+    "AXSplitter": "splitter",
+    "AXStaticText": "text",
+    "AXTab": "tab",
+    "AXTable": "table",
+    "AXTextArea": "text area",
+    "AXTextField": "text field",
+    "AXToolbar": "toolbar",
+    "AXUnknown": "unknown",
+    "AXValueIndicator": "value indicator",
+    "AXWebArea": "web area",
+    "AXWindow": "standard window",
+}
+
+_CUSTOM_ACTION_NAME_MAP = {
+    "Move previous": "AXMovePrevious",
+    "Move next": "AXMoveNext",
+    "Remove from toolbar": "AXRemoveFromToolbar",
 }
 
 
@@ -131,6 +199,13 @@ def get_windows(ax_app: Any) -> list[Any]:
     return windows
 
 
+def get_menu_bar(ax_app: Any) -> Any | None:
+    err, menu_bar = AXUIElementCopyAttributeValue(ax_app, "AXMenuBar", None)
+    if err == kAXErrorSuccess and menu_bar is not None:
+        return menu_bar
+    return None
+
+
 def _is_ax_error_value(v: Any) -> bool:
     s = str(type(v))
     if "AXValue" in s or "error" in str(v):
@@ -165,33 +240,148 @@ def _read_attrs(element: Any) -> dict[str, Any]:
     return result
 
 
+def _clean_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, float):
+        if value.is_integer():
+            text = str(int(value))
+        else:
+            text = f"{value}".rstrip("0").rstrip(".")
+    else:
+        text = str(value)
+    text = text.strip()
+    return text or None
+
+
+def _value_type_name(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, float):
+        return "float"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, str):
+        return "string"
+    return None
+
+
+def _display_role(attrs: dict[str, Any], role: str) -> str:
+    subrole = _clean_text(attrs.get(kAXSubroleAttribute))
+    if subrole in _SUBROLE_DISPLAY_OVERRIDES:
+        return _SUBROLE_DISPLAY_OVERRIDES[subrole]
+    mapped = _ROLE_DISPLAY_OVERRIDES.get(role)
+    if mapped:
+        return mapped
+    role_desc = _clean_text(attrs.get(kAXRoleDescriptionAttribute))
+    if role_desc and role not in {"AXWindow", "AXRow", "AXUnknown"}:
+        return role_desc
+    return role.removeprefix("AX").lower()
+
+
+def _normalize_action_name(action: Any) -> str | None:
+    raw = str(action).strip()
+    if not raw:
+        return None
+    if raw.startswith("AX"):
+        return raw
+    if "\n" in raw:
+        first_line = raw.splitlines()[0].strip()
+        if first_line.startswith("Name:"):
+            raw = first_line.removeprefix("Name:").strip()
+    mapped = _CUSTOM_ACTION_NAME_MAP.get(raw)
+    if mapped is not None:
+        return mapped
+    if raw.startswith("Name:"):
+        mapped = _CUSTOM_ACTION_NAME_MAP.get(raw.removeprefix("Name:").strip())
+        if mapped is not None:
+            return mapped
+    return None
+
+
 def _get_actions(element: Any, role: str) -> list[str]:
     if role not in _ACTIONABLE_ROLES:
         return []
     err, actions = AXUIElementCopyActionNames(element, None)
     if err != kAXErrorSuccess or actions is None:
         return []
-    skip = {"AXPress", "AXCancel", "AXConfirm", "AXShowMenu"}
-    return [str(a) for a in actions if str(a) not in skip]
+    skip = {
+        "AXPress",
+        "AXCancel",
+        "AXConfirm",
+        "AXShowMenu",
+        "AXShowDefaultUI",
+        "AXShowAlternateUI",
+    }
+    raw_actions: list[str] = []
+    for action in actions:
+        normalized = _normalize_action_name(action)
+        if normalized is None or normalized in skip:
+            continue
+        raw_actions.append(normalized)
+    if role in {"AXScrollArea", "AXCollection", "AXList", "AXOutline", "AXTable"}:
+        return [
+            action
+            for action in raw_actions
+            if action in {"AXScrollUpByPage", "AXScrollDownByPage"}
+        ]
+    return raw_actions
+
+
+def get_action_names_for_ref(element: Any) -> list[str]:
+    """Return raw AX action names for an element reference."""
+    try:
+        err, actions = AXUIElementCopyActionNames(element, None)
+    except Exception:
+        return []
+    if err != kAXErrorSuccess or actions is None:
+        return []
+    return [str(action) for action in actions]
+
+
+def get_parent_ref(element: Any) -> Any | None:
+    """Return the AX parent element if available."""
+    try:
+        err, parent = AXUIElementCopyAttributeValue(element, kAXParentAttribute, None)
+    except Exception:
+        return None
+    if err == kAXErrorSuccess and parent is not None:
+        return parent
+    return None
+
+
+def has_scrollbar_ref(element: Any) -> bool:
+    """Whether an element exposes a vertical or horizontal scrollbar."""
+    for attr in ("AXVerticalScrollBar", "AXHorizontalScrollBar"):
+        try:
+            err, scrollbar = AXUIElementCopyAttributeValue(element, attr, None)
+        except Exception:
+            continue
+        if err == kAXErrorSuccess and scrollbar is not None:
+            return True
+    return False
 
 
 def _resolve_label(attrs: dict[str, Any], role: str) -> str | None:
-    title = attrs.get(kAXTitleAttribute)
-    if title and str(title).strip():
-        return str(title).strip()
-    desc = attrs.get(kAXDescriptionAttribute)
-    if desc and str(desc).strip():
-        return str(desc).strip()
-    value = attrs.get(kAXValueAttribute)
-    if value is not None and role in ("AXStaticText", "AXMenuItem", "AXLink"):
-        s = str(value).strip()
-        if s:
-            return s
+    title = _clean_text(attrs.get(kAXTitleAttribute))
+    if title:
+        return title
+    description = _clean_text(attrs.get(kAXDescriptionAttribute))
+    value = _clean_text(attrs.get(kAXValueAttribute))
+    subrole = _clean_text(attrs.get(kAXSubroleAttribute))
+    if description is not None and role == "AXList" and subrole in {"AXCollectionList", "AXSectionList"}:
+        return description
+    if role == "AXHeading" and value is not None and value == description:
+        return value
+    if value is not None and (description is None or role in ("AXStaticText", "AXMenuItem", "AXLink")):
+        return value
     return None
 
 
 def _build_states(element: Any, attrs: dict[str, Any]) -> list[str]:
-    states = []
+    states: list[str] = []
     for attr, (state_name, invert) in _STATE_MAP.items():
         val = attrs.get(attr)
         if val is None:
@@ -205,13 +395,28 @@ def _build_states(element: Any, attrs: dict[str, Any]) -> list[str]:
     err, settable = AXUIElementIsAttributeSettable(element, kAXValueAttribute, None)
     if err == kAXErrorSuccess and settable:
         states.append("settable")
+        value_type = _value_type_name(attrs.get(kAXValueAttribute))
+        if value_type is not None:
+            states.append(value_type)
     role = attrs.get(kAXRoleAttribute, "")
     if role == "AXRow":
         err2, selectable = AXUIElementIsAttributeSettable(element, kAXSelectedAttribute, None)
         if err2 == kAXErrorSuccess and selectable:
             if "selected" not in states:
                 states.append("selectable")
-    states.sort()
+    state_order = {
+        "disabled": 0,
+        "selected": 1,
+        "selectable": 2,
+        "expanded": 3,
+        "focused": 4,
+        "settable": 5,
+        "string": 6,
+        "float": 7,
+        "integer": 8,
+        "boolean": 9,
+    }
+    states.sort(key=lambda state: (state_order.get(state, 100), state))
     return states
 
 
@@ -227,33 +432,30 @@ def walk_tree(
     include_states: bool = True,
     target_pid: int | None = None,
 ) -> list[Node]:
-    from collections import deque
-
     # Track AX read assertion for coordinated access
     if target_pid is not None:
         AssertionTracker.acquire(target_pid, AXEnablementKind.READ_ATTRIBUTES)
 
     nodes: list[Node] = []
-    queue: deque[tuple[Any, int]] = deque([(ax_element, 0)])
+    stack: list[tuple[Any, int]] = [(ax_element, 0)]
 
-    while queue and len(nodes) < max_nodes:
-        element, depth = queue.popleft()
+    while stack and len(nodes) < max_nodes:
+        element, depth = stack.pop()
         if depth > max_depth:
             continue
 
         attrs = _read_attrs(element)
         role = str(attrs.get(kAXRoleAttribute, "AXUnknown"))
-        role_desc = attrs.get(kAXRoleDescriptionAttribute)
-        display_role = str(role_desc) if role_desc else role.removeprefix("AX").lower()
+        display_role = _display_role(attrs, role)
 
         label = _resolve_label(attrs, role)
         states = _build_states(element, attrs) if include_states else []
-        description_raw = attrs.get(kAXDescriptionAttribute)
-        description = str(description_raw).strip() if description_raw and str(description_raw).strip() else None
-        value_raw = attrs.get(kAXValueAttribute)
-        value = str(value_raw) if value_raw is not None else None
-        ax_id_raw = attrs.get(kAXIdentifierAttribute)
-        ax_id = str(ax_id_raw) if ax_id_raw else None
+        description = _clean_text(attrs.get(kAXDescriptionAttribute))
+        value = _clean_text(attrs.get(kAXValueAttribute))
+        placeholder = _clean_text(attrs.get("AXPlaceholderValue"))
+        help_text = _clean_text(attrs.get("AXHelp"))
+        value_description = _clean_text(attrs.get("AXValueDescription"))
+        ax_id = _clean_text(attrs.get(kAXIdentifierAttribute))
         secondary_actions = _get_actions(element, role) if include_actions else []
 
         # Web area detection
@@ -280,11 +482,15 @@ def walk_tree(
             states=states,
             description=description,
             value=value,
+            placeholder=placeholder,
+            help_text=help_text,
+            value_description=value_description,
             ax_id=ax_id,
             secondary_actions=secondary_actions,
             depth=depth,
             ax_ref=element,
             ax_role=role,
+            subrole=_clean_text(attrs.get(kAXSubroleAttribute)),
             is_web_area=is_web_area,
             is_oop=is_oop,
             element_pid=element_pid,
@@ -293,9 +499,12 @@ def walk_tree(
 
         children = attrs.get(kAXChildrenAttribute)
         if children:
-            # Cap children per element so one large table doesn't starve siblings
-            for child in children[:_MAX_CHILDREN_PER_ELEMENT]:
-                queue.append((child, depth + 1))
+            # Depth-first preorder traversal. Reverse push keeps AX child order
+            # stable in the final flat list, which the pruning/indexing passes
+            # rely on when reconstructing parent/child relationships.
+            capped_children = list(children[:_MAX_CHILDREN_PER_ELEMENT])
+            for child in reversed(capped_children):
+                stack.append((child, depth + 1))
 
     # Release AX read assertion
     if target_pid is not None:
@@ -314,6 +523,32 @@ def _get_element_pid(element: Any) -> int | None:
     except (ImportError, Exception):
         pass
     return None
+
+
+def node_from_ref(element: Any, *, depth: int = 0, index: int = -1) -> Node:
+    """Build a lightweight Node wrapper around a live AX element reference."""
+    attrs = _read_attrs(element)
+    role = str(attrs.get(kAXRoleAttribute, "AXUnknown"))
+    display_role = _display_role(attrs, role)
+    return Node(
+        index=index,
+        role=display_role,
+        label=_resolve_label(attrs, role),
+        states=_build_states(element, attrs),
+        description=_clean_text(attrs.get(kAXDescriptionAttribute)),
+        value=_clean_text(attrs.get(kAXValueAttribute)),
+        placeholder=_clean_text(attrs.get("AXPlaceholderValue")),
+        help_text=_clean_text(attrs.get("AXHelp")),
+        value_description=_clean_text(attrs.get("AXValueDescription")),
+        ax_id=_clean_text(attrs.get(kAXIdentifierAttribute)),
+        secondary_actions=_get_actions(element, role),
+        depth=depth,
+        ax_ref=element,
+        ax_role=role,
+        subrole=_clean_text(attrs.get(kAXSubroleAttribute)),
+        is_web_area=(role == "AXWebArea"),
+        element_pid=_get_element_pid(element),
+    )
 
 
 def get_focused_element(ax_app: Any, tree: list[Node]) -> int | None:
@@ -378,25 +613,33 @@ def _extract_size(ax_value: Any) -> tuple[float, float] | None:
     return None
 
 
-def get_element_position(node: Node) -> tuple[float | None, float | None]:
-    """Get the screen-coordinate center of an element via AXPosition + AXSize."""
+def get_element_frame(node: Node) -> tuple[float, float, float, float] | None:
+    """Get the screen-coordinate frame of an element via AXPosition + AXSize."""
     if node.ax_ref is None:
-        return (None, None)
+        return None
 
     err_p, pos_val = AXUIElementCopyAttributeValue(node.ax_ref, kAXPositionAttribute, None)
     err_s, size_val = AXUIElementCopyAttributeValue(node.ax_ref, kAXSizeAttribute, None)
     if err_p != kAXErrorSuccess or err_s != kAXErrorSuccess:
-        return (None, None)
+        return None
     if pos_val is None or size_val is None:
-        return (None, None)
+        return None
 
     point = _extract_point(pos_val)
     size = _extract_size(size_val)
     if point is None or size is None:
+        return None
+
+    return (point[0], point[1], size[0], size[1])
+
+
+def get_element_position(node: Node) -> tuple[float | None, float | None]:
+    """Get the screen-coordinate center of an element via AXPosition + AXSize."""
+    frame = get_element_frame(node)
+    if frame is None:
         return (None, None)
 
-    px, py = point
-    sw, sh = size
+    px, py, sw, sh = frame
     return (px + sw / 2, py + sh / 2)
 
 

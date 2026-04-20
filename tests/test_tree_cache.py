@@ -12,6 +12,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock
 
+from app._lib.graphs import GraphState, annotate_graph_nodes
 from app._lib.observer import TreeInvalidationMonitor
 from app._lib.refetchable_tree import RefetchableTree, RefetchErrorCode
 from app.response import Node
@@ -224,6 +225,28 @@ class TestTreeUpdate(unittest.TestCase):
 
         tree.update([_node(0)])
         self.assertFalse(tree.is_invalidated)
+
+    def test_closed_transient_graph_reopens_and_rebinds_by_locator(self) -> None:
+        original = [_node(0, label="View")]
+        reopened = [_node(0, label="View")]
+        annotate_graph_nodes(original, "transient-1", 1)
+        annotate_graph_nodes(reopened, "transient-1", 2)
+
+        reopen_fn = MagicMock(return_value=reopened)
+        tree = RefetchableTree(
+            original,
+            monitor=None,
+            graph_id="transient-1",
+            generation=1,
+            graph_state_getter=lambda: GraphState.CLOSED,
+            reopen_fn=reopen_fn,
+        )
+
+        result = tree.element(0)
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.node.label, "View")
+        reopen_fn.assert_called_once()
 
 
 if __name__ == "__main__":

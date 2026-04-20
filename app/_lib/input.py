@@ -6,6 +6,7 @@ from typing import Any
 from Quartz import (
     CGEventCreateMouseEvent,
     CGEventCreateKeyboardEvent,
+    CGEventSetDoubleValueField,
     CGEventSetFlags,
     CGEventSetIntegerValueField,
     CGEventSourceCreate,
@@ -20,15 +21,19 @@ from Quartz import (
     kCGEventOtherMouseDown,
     kCGEventOtherMouseUp,
     kCGMouseEventClickState,
+    kCGMouseEventPressure,
+    kCGMouseEventWindowUnderMousePointer,
+    kCGMouseEventWindowUnderMousePointerThatCanHandleThisEvent,
     kCGMouseButtonLeft,
     kCGMouseButtonRight,
     kCGMouseButtonCenter,
+    kCGMouseEventNumber,
 )
 from Quartz import CGPointMake
 
 from app._lib import screenshot
 from app._lib.errors import InputError, CGEventError
-from app._lib.keys import modifier_keycodes, parse_key_combo
+from app._lib.keys import parse_key_combo
 
 
 _source = CGEventSourceCreate(kCGEventSourceStatePrivate)
@@ -42,6 +47,9 @@ _BUTTON_MAP = {
 _DOUBLE_CLICK_INTERVAL = 0.1
 _KEY_HOLD_DELAY = 0.008  # delay between key down and key up
 _KEY_EVENT_DELAY = 0.003
+_MOUSE_PRESSURE = 1.0
+_SCROLL_LINE_DELTA = 5
+_MOUSE_EVENT_NUMBER = 0
 
 _TEXT_KEY_ALIASES = {
     "apostrophe": "'",
@@ -77,23 +85,10 @@ def _post_key_event(pid: int, keycode: int, is_down: bool, flags: int) -> None:
 
 
 def _post_keycode_with_modifiers(pid: int, keycode: int, modifiers: int) -> None:
-    active_modifiers = 0
-    modifier_sequence = modifier_keycodes(modifiers)
-
-    for modifier_keycode, modifier_flag in modifier_sequence:
-        active_modifiers |= modifier_flag
-        _post_key_event(pid, modifier_keycode, True, active_modifiers)
-        time.sleep(_KEY_EVENT_DELAY)
-
-    _post_key_event(pid, keycode, True, active_modifiers)
+    _post_key_event(pid, keycode, True, modifiers)
     time.sleep(_KEY_HOLD_DELAY)
-    _post_key_event(pid, keycode, False, active_modifiers)
+    _post_key_event(pid, keycode, False, modifiers)
     time.sleep(_KEY_EVENT_DELAY)
-
-    for modifier_keycode, modifier_flag in reversed(modifier_sequence):
-        active_modifiers &= ~modifier_flag
-        _post_key_event(pid, modifier_keycode, False, active_modifiers)
-        time.sleep(_KEY_EVENT_DELAY)
 
 
 def _post_unicode_char(pid: int, char: str) -> None:
@@ -132,23 +127,57 @@ def window_to_screen_coords(
     if screenshot_size is not None:
         shot_width, shot_height = screenshot_size
         if shot_width > 0 and shot_height > 0:
-            local_x = x * (width / shot_width)
-            local_y = y * (height / shot_height)
+            local_x = max(0.0, min(float(x), float(shot_width - 1)))
+            local_y = max(0.0, min(float(y), float(shot_height - 1)))
+            local_x = local_x * (width / shot_width)
+            local_y = local_y * (height / shot_height)
 
     return (wx + local_x, wy + local_y)
 
 
-def _post_click(pid: int, point: Any, button: str, count: int) -> None:
+def _decorate_mouse_event(
+    event: Any,
+    *,
+    window_id: int | None,
+    pressure: float,
+    click_state: int | None = None,
+    event_number: int | None = None,
+) -> None:
+    if click_state is not None:
+        CGEventSetIntegerValueField(event, kCGMouseEventClickState, click_state)
+    if event_number is not None:
+        CGEventSetIntegerValueField(event, kCGMouseEventNumber, event_number)
+    CGEventSetDoubleValueField(event, kCGMouseEventPressure, pressure)
+    if window_id is not None:
+        CGEventSetIntegerValueField(event, kCGMouseEventWindowUnderMousePointer, window_id)
+        CGEventSetIntegerValueField(
+            event,
+            kCGMouseEventWindowUnderMousePointerThatCanHandleThisEvent,
+            window_id,
+        )
+
+
+def _post_click(
+    pid: int,
+    point: Any,
+    button: str,
+    count: int,
+    *,
+    window_id: int | None = None,
+) -> None:
     if button not in _BUTTON_MAP:
         raise InputError(f"Unknown mouse button: {button}")
 
     btn, down_type, up_type = _BUTTON_MAP[button]
+    global _MOUSE_EVENT_NUMBER
 
     # Move cursor to target first — background apps need this to register
     # the correct hit-test target before mouseDown arrives.
     move = CGEventCreateMouseEvent(_source, kCGEventMouseMoved, point, kCGMouseButtonLeft)
     if move is None:
         raise CGEventError("cg_event_creation_failed: mouseMove")
+    _MOUSE_EVENT_NUMBER += 1
+    _decorate_mouse_event(move, window_id=window_id, pressure=0.0, event_number=_MOUSE_EVENT_NUMBER)
     CGEventPostToPid(pid, move)
     time.sleep(0.01)  # brief settle for hit-test registration
 
@@ -159,7 +188,14 @@ def _post_click(pid: int, point: Any, button: str, count: int) -> None:
         down = CGEventCreateMouseEvent(_source, down_type, point, btn)
         if down is None:
             raise CGEventError("cg_event_creation_failed: mouseDown")
-        CGEventSetIntegerValueField(down, kCGMouseEventClickState, click_num)
+        _MOUSE_EVENT_NUMBER += 1
+        _decorate_mouse_event(
+            down,
+            window_id=window_id,
+            pressure=_MOUSE_PRESSURE,
+            click_state=click_num,
+            event_number=_MOUSE_EVENT_NUMBER,
+        )
         CGEventPostToPid(pid, down)
 
         time.sleep(0.005)  # brief hold between down and up
@@ -167,7 +203,14 @@ def _post_click(pid: int, point: Any, button: str, count: int) -> None:
         up = CGEventCreateMouseEvent(_source, up_type, point, btn)
         if up is None:
             raise CGEventError("cg_event_creation_failed: mouseUp")
-        CGEventSetIntegerValueField(up, kCGMouseEventClickState, click_num)
+        _MOUSE_EVENT_NUMBER += 1
+        _decorate_mouse_event(
+            up,
+            window_id=window_id,
+            pressure=0.0,
+            click_state=click_num,
+            event_number=_MOUSE_EVENT_NUMBER,
+        )
         CGEventPostToPid(pid, up)
 
 
@@ -182,13 +225,20 @@ def click_at(
 ) -> None:
     """Click at screenshot-pixel coordinates."""
     sx, sy = window_to_screen_coords(window_id, x, y, screenshot_size)
-    _post_click(pid, CGPointMake(sx, sy), button, count)
+    _post_click(pid, CGPointMake(sx, sy), button, count, window_id=window_id)
 
 
-def click_at_screen_point(pid: int, x: float, y: float,
-                          button: str = "left", count: int = 1) -> None:
+def click_at_screen_point(
+    pid: int,
+    x: float,
+    y: float,
+    button: str = "left",
+    count: int = 1,
+    *,
+    window_id: int | None = None,
+) -> None:
     """Click at screen-point coordinates (from AXPosition)."""
-    _post_click(pid, CGPointMake(x, y), button, count)
+    _post_click(pid, CGPointMake(x, y), button, count, window_id=window_id)
 
 
 def drag(
@@ -209,12 +259,14 @@ def drag(
     move = CGEventCreateMouseEvent(_source, kCGEventMouseMoved, from_point, kCGMouseButtonLeft)
     if move is None:
         raise CGEventError("cg_event_creation_failed: mouseDragged move")
+    _decorate_mouse_event(move, window_id=window_id, pressure=0.0)
     CGEventPostToPid(pid, move)
     time.sleep(0.01)
 
     down = CGEventCreateMouseEvent(_source, kCGEventLeftMouseDown, from_point, kCGMouseButtonLeft)
     if down is None:
         raise CGEventError("cg_event_creation_failed: mouseDragged down")
+    _decorate_mouse_event(down, window_id=window_id, pressure=_MOUSE_PRESSURE)
     CGEventPostToPid(pid, down)
 
     time.sleep(0.02)
@@ -226,12 +278,18 @@ def drag(
         iy = sy1 + (sy2 - sy1) * t
         drag_event = CGEventCreateMouseEvent(_source, kCGEventLeftMouseDragged, CGPointMake(ix, iy), kCGMouseButtonLeft)
         if drag_event is not None:
+            _decorate_mouse_event(
+                drag_event,
+                window_id=window_id,
+                pressure=_MOUSE_PRESSURE,
+            )
             CGEventPostToPid(pid, drag_event)
         time.sleep(0.005)
 
     up = CGEventCreateMouseEvent(_source, kCGEventLeftMouseUp, to_point, kCGMouseButtonLeft)
     if up is None:
         raise CGEventError("cg_event_creation_failed: mouseDragged up")
+    _decorate_mouse_event(up, window_id=window_id, pressure=0.0)
     CGEventPostToPid(pid, up)
 
 
@@ -256,18 +314,25 @@ _SCROLL_STEP_DELAY = 0.015  # delay between individual scroll events
 def _scroll_deltas(direction: str) -> tuple[int, int]:
     """Return (dy, dx) unit delta for a scroll direction."""
     if direction == "up":
-        return (1, 0)
+        return (_SCROLL_LINE_DELTA, 0)
     elif direction == "down":
-        return (-1, 0)
+        return (-_SCROLL_LINE_DELTA, 0)
     elif direction == "left":
-        return (0, 1)
+        return (0, _SCROLL_LINE_DELTA)
     elif direction == "right":
-        return (0, -1)
+        return (0, -_SCROLL_LINE_DELTA)
     return (0, 0)
 
 
-def scroll_pid(pid: int, x: float, y: float,
-               direction: str, clicks: int = 5) -> None:
+def scroll_pid(
+    pid: int,
+    x: float,
+    y: float,
+    direction: str,
+    clicks: int = 5,
+    *,
+    window_id: int | None = None,
+) -> None:
     """Scroll via CGEventPostToPid — truly background, no cursor movement.
 
     Works for native Cocoa apps but silently ignored by browsers/Electron.
@@ -280,6 +345,7 @@ def scroll_pid(pid: int, x: float, y: float,
     move = CGEventCreateMouseEvent(_source, kCGEventMouseMoved, point, kCGMouseButtonLeft)
     if move is None:
         raise CGEventError("CGEventCreateScrollWheelEvent returned NULL")
+    _decorate_mouse_event(move, window_id=window_id, pressure=0.0)
     CGEventPostToPid(pid, move)
     time.sleep(0.01)
 
@@ -291,6 +357,49 @@ def scroll_pid(pid: int, x: float, y: float,
         CGEventPostToPid(pid, scroll)
         if i < clicks - 1:
             time.sleep(_SCROLL_STEP_DELAY)
+
+
+def scroll_pid_pixel(
+    pid: int,
+    x: float,
+    y: float,
+    direction: str,
+    pixels: int,
+    *,
+    window_id: int | None = None,
+) -> None:
+    """Scroll via pixel deltas for better cross-app background delivery."""
+    from Quartz import (
+        CGEventCreateScrollWheelEvent,
+        kCGScrollEventUnitPixel,
+        kCGScrollWheelEventPointDeltaAxis1,
+        kCGScrollWheelEventPointDeltaAxis2,
+    )
+
+    point = CGPointMake(x, y)
+    move = CGEventCreateMouseEvent(_source, kCGEventMouseMoved, point, kCGMouseButtonLeft)
+    if move is None:
+        raise CGEventError("CGEventCreateScrollWheelEvent returned NULL")
+    _decorate_mouse_event(move, window_id=window_id, pressure=0.0)
+    CGEventPostToPid(pid, move)
+    time.sleep(0.01)
+
+    dy = dx = 0
+    if direction == "up":
+        dy = pixels
+    elif direction == "down":
+        dy = -pixels
+    elif direction == "left":
+        dx = pixels
+    elif direction == "right":
+        dx = -pixels
+
+    scroll = CGEventCreateScrollWheelEvent(_source, kCGScrollEventUnitPixel, 2, dy, dx)
+    if scroll is None:
+        raise CGEventError("CGEventCreateScrollWheelEvent returned NULL")
+    CGEventSetIntegerValueField(scroll, kCGScrollWheelEventPointDeltaAxis1, dy)
+    CGEventSetIntegerValueField(scroll, kCGScrollWheelEventPointDeltaAxis2, dx)
+    CGEventPostToPid(pid, scroll)
 
 
 def scroll_system(x: float, y: float,

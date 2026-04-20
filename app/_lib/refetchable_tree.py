@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 from app.response import Node
 from app._lib.errors import RefetchError
+from app._lib.graphs import GraphLocator, GraphState, annotate_graph_nodes, match_node_by_locator
 from app._lib.observer import TreeInvalidationMonitor
 from app._lib.tracing import controller_tracer
 
@@ -80,12 +81,20 @@ class RefetchableTree:
         ax_window: Any = None,
         target_pid: int | None = None,
         walk_fn: Callable[..., list[Node]] | None = None,
+        graph_id: str | None = None,
+        generation: int = 0,
+        graph_state_getter: Callable[[], GraphState] | None = None,
+        reopen_fn: Callable[[], list[Node] | None] | None = None,
     ) -> None:
         self._nodes = nodes
         self._monitor = monitor
         self._ax_window = ax_window
         self._target_pid = target_pid
         self._walk_fn = walk_fn
+        self._graph_id = graph_id
+        self._generation = generation
+        self._graph_state_getter = graph_state_getter
+        self._reopen_fn = reopen_fn
 
     @property
     def nodes(self) -> list[Node]:
@@ -129,6 +138,13 @@ class RefetchableTree:
 
         original = self._nodes[index]
 
+        graph_state = self._graph_state_getter() if self._graph_state_getter is not None else GraphState.LIVE
+        if (
+            original.graph_generation not in (0, self._generation)
+            or graph_state in {GraphState.CLOSED, GraphState.REOPENING}
+        ):
+            return self._recover_stale_graph(original, graph_state)
+
         # Fast path: tree not invalidated → element still valid
         if not self.is_invalidated:
             logger.debug("%s Element still valid (cache hit)", LOG_PREFIX)
@@ -159,6 +175,7 @@ class RefetchableTree:
         """
         target_role = original.ax_role
         target_label = original.label
+        locator = self._locator_for_node(original)
 
         # Step 1: Check for ambiguity before refetch
         existing_matches = _find_equivalent_elements(self._nodes, target_role, target_label)
@@ -193,10 +210,22 @@ class RefetchableTree:
 
         # Update cached nodes and reset monitor
         self._nodes = new_nodes
+        if self._graph_id is not None:
+            self._generation += 1
         if self._monitor is not None:
             self._monitor.reset()
 
         # Step 3: Search for equivalent in new tree
+        if locator is not None:
+            matched = match_node_by_locator(new_nodes, locator)
+            if matched is not None:
+                logger.debug(
+                    "%s Found equivalent element by locator: %s",
+                    LOG_PREFIX,
+                    f"[{matched.index}] {matched.ax_role} {matched.label!r}",
+                )
+                return RefetchResult(node=matched)
+
         new_matches = _find_equivalent_elements(new_nodes, target_role, target_label)
 
         # Step 4a: 0 matches → element no longer exists
@@ -264,12 +293,52 @@ class RefetchableTree:
         search_candidates = same_depth if same_depth else candidates
         return min(search_candidates, key=lambda n: abs(n.index - original.index))
 
+    def _recover_stale_graph(
+        self,
+        original: Node,
+        graph_state: GraphState,
+    ) -> RefetchResult:
+        locator = self._locator_for_node(original)
+        if graph_state == GraphState.CLOSED and self._reopen_fn is not None:
+            logger.debug("%s Graph closed; attempting reopen", LOG_PREFIX)
+            new_nodes = self._reopen_fn()
+            if new_nodes:
+                self._nodes = new_nodes
+                if self._graph_id is not None:
+                    self._generation += 1
+                if locator is not None:
+                    matched = match_node_by_locator(new_nodes, locator)
+                    if matched is not None:
+                        return RefetchResult(node=matched)
+                return RefetchResult(
+                    error_code=RefetchErrorCode.NOT_FOUND,
+                    error_message="Transient graph reopened but target element could not be rebound",
+                )
+            return RefetchResult(
+                error_code=RefetchErrorCode.NOT_FOUND,
+                error_message="Transient graph is closed and could not be reopened",
+            )
+
+        if locator is not None:
+            new_nodes = self.get_nodes()
+            matched = match_node_by_locator(new_nodes, locator)
+            if matched is not None:
+                return RefetchResult(node=matched)
+
+        return RefetchResult(
+            error_code=RefetchErrorCode.NOT_FOUND,
+            error_message="Graph generation changed and target element is stale",
+        )
+
     def _rewalk(self) -> list[Node] | None:
         """Re-walk the AX tree. Returns None if unable."""
         if self._walk_fn is None or self._ax_window is None:
             return None
         try:
-            return self._walk_fn(self._ax_window, target_pid=self._target_pid)
+            nodes = self._walk_fn(self._ax_window, target_pid=self._target_pid)
+            if self._graph_id is not None:
+                annotate_graph_nodes(nodes, self._graph_id, self._generation + 1)
+            return nodes
         except Exception as e:
             logger.debug("Tree re-walk failed during refetch: %s", e)
             return None
@@ -279,7 +348,13 @@ class RefetchableTree:
         nodes: list[Node],
         *,
         ax_window: Any = None,
+        monitor: TreeInvalidationMonitor | None = None,
         target_pid: int | None = None,
+        walk_fn: Callable[..., list[Node]] | None = None,
+        graph_id: str | None = None,
+        generation: int | None = None,
+        graph_state_getter: Callable[[], GraphState] | None = None,
+        reopen_fn: Callable[[], list[Node] | None] | None = None,
     ) -> None:
         """Replace the cached tree with fresh nodes (after a full snapshot).
 
@@ -288,7 +363,25 @@ class RefetchableTree:
         self._nodes = nodes
         if ax_window is not None:
             self._ax_window = ax_window
+        if monitor is not None:
+            self._monitor = monitor
         if target_pid is not None:
             self._target_pid = target_pid
+        if walk_fn is not None:
+            self._walk_fn = walk_fn
+        if graph_id is not None:
+            self._graph_id = graph_id
+        if generation is not None:
+            self._generation = generation
+        if graph_state_getter is not None:
+            self._graph_state_getter = graph_state_getter
+        if reopen_fn is not None:
+            self._reopen_fn = reopen_fn
         if self._monitor is not None:
             self._monitor.reset()
+
+    def _locator_for_node(self, node: Node) -> GraphLocator | None:
+        locator = getattr(node, "graph_locator", None)
+        if isinstance(locator, GraphLocator):
+            return locator
+        return None

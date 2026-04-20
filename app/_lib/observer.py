@@ -14,6 +14,7 @@ import logging
 import threading
 import time
 from contextlib import contextmanager
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable
 
@@ -298,6 +299,14 @@ class AXNotificationObserver:
 # NotificationBridge — routes AX notifications to Python handlers
 # ---------------------------------------------------------------------------
 
+@dataclass(frozen=True)
+class NotificationEvent:
+    sequence: int
+    notification: str
+    element: Any
+    observed_at: float
+
+
 class NotificationBridge:
     """Routes AX notifications to registered Python handlers.
 
@@ -307,20 +316,40 @@ class NotificationBridge:
 
     def __init__(self) -> None:
         self._handlers: dict[str, list[Callable[[str], None]]] = {}
+        self._detailed_handlers: dict[str, list[Callable[[Any, Any, str], None]]] = {}
         self._lock = threading.Lock()
         self._event = threading.Event()
         self._last_notification: str | None = None
+        self._last_sequence = 0
+        self._history: list[NotificationEvent] = []
 
     def on_notification(self, observer: Any, element: Any, notification: str) -> None:
         """C callback → Python dispatch. Called on run loop thread."""
         with self._lock:
+            self._last_sequence += 1
             self._last_notification = notification
             handlers = list(self._handlers.get(notification, []))
+            detailed_handlers = list(self._detailed_handlers.get(notification, []))
+            self._history.append(
+                NotificationEvent(
+                    sequence=self._last_sequence,
+                    notification=notification,
+                    element=element,
+                    observed_at=time.monotonic(),
+                )
+            )
+            if len(self._history) > 256:
+                self._history = self._history[-256:]
         for handler in handlers:
             try:
                 handler(notification)
             except Exception as e:
                 logger.debug("Notification handler error for %s: %s", notification, e)
+        for handler in detailed_handlers:
+            try:
+                handler(observer, element, notification)
+            except Exception as e:
+                logger.debug("Detailed notification handler error for %s: %s", notification, e)
         self._event.set()
 
     def subscribe(self, notification: str, handler: Callable[[str], None]) -> None:
@@ -336,6 +365,60 @@ class NotificationBridge:
                 handlers.remove(handler)
             except ValueError:
                 pass
+
+    def subscribe_detailed(
+        self,
+        notification: str,
+        handler: Callable[[Any, Any, str], None],
+    ) -> None:
+        with self._lock:
+            self._detailed_handlers.setdefault(notification, []).append(handler)
+
+    def unsubscribe_detailed(
+        self,
+        notification: str,
+        handler: Callable[[Any, Any, str], None],
+    ) -> None:
+        with self._lock:
+            handlers = self._detailed_handlers.get(notification, [])
+            try:
+                handlers.remove(handler)
+            except ValueError:
+                pass
+
+    def mark(self) -> int:
+        with self._lock:
+            return self._last_sequence
+
+    def events_since(
+        self,
+        sequence: int,
+        notifications: list[str] | None = None,
+    ) -> list[NotificationEvent]:
+        with self._lock:
+            events = [event for event in self._history if event.sequence > sequence]
+        if notifications is None:
+            return events
+        wanted = set(notifications)
+        return [event for event in events if event.notification in wanted]
+
+    def wait_for_any_since(
+        self,
+        sequence: int,
+        notifications: list[str] | None,
+        timeout: float,
+    ) -> NotificationEvent | None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            events = self.events_since(sequence, notifications)
+            if events:
+                return events[0]
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            self._event.wait(timeout=min(remaining, 0.02))
+            self._event.clear()
+        return None
 
     def wait_for_any(self, notifications: list[str], timeout: float) -> str | None:
         """Block until any listed notification fires or timeout.
@@ -353,6 +436,9 @@ class NotificationBridge:
         """Clear all handlers."""
         with self._lock:
             self._handlers.clear()
+            self._detailed_handlers.clear()
+            self._history.clear()
+            self._last_sequence = 0
         self._event.clear()
         self._last_notification = None
 
@@ -570,17 +656,29 @@ class TreeInvalidationMonitor:
         self._is_invalidated = False
         self._lock = threading.Lock()
         self._invalidation_event = threading.Event()
+        self._notification_count = 0
+        self._last_notification: str | None = None
 
     @property
     def is_invalidated(self) -> bool:
         with self._lock:
             return self._is_invalidated
 
+    @property
+    def notification_count(self) -> int:
+        with self._lock:
+            return self._notification_count
+
+    @property
+    def last_notification(self) -> str | None:
+        with self._lock:
+            return self._last_notification
+
     def on_notification(self, notification: str) -> None:
         """Called when a tree-invalidating AX notification fires."""
         with self._lock:
-            if self._is_invalidated:
-                return  # Already invalidated
+            self._notification_count += 1
+            self._last_notification = notification
             self._is_invalidated = True
         self._invalidation_event.set()
 
@@ -588,6 +686,7 @@ class TreeInvalidationMonitor:
         """Reset the invalidation flag (after refetching the tree)."""
         with self._lock:
             self._is_invalidated = False
+            self._last_notification = None
         self._invalidation_event.clear()
 
     def wait_for_invalidation(self, timeout: float) -> bool:
