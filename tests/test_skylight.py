@@ -82,6 +82,20 @@ class SkyLightLoadTests(unittest.TestCase):
 
         self.assertFalse(skylight.validate_window_owner(77, 1234))
 
+    @patch("app._lib.skylight._load_framework")
+    def test_post_mouse_event_returns_false_when_spi_unavailable(self, mock_load: MagicMock) -> None:
+        mock_framework = MagicMock()
+        mock_framework.CGSMainConnectionID.return_value = 42
+        mock_framework.CGSPostMouseEventToProcess = None  # SPI not available
+        mock_load.return_value = mock_framework
+
+        import importlib
+        from app._lib import skylight
+        importlib.reload(skylight)
+
+        result = skylight.post_mouse_event(1234, 1, 100.0, 200.0)
+        self.assertFalse(result)
+
 
 class MicroActivationTests(unittest.TestCase):
 

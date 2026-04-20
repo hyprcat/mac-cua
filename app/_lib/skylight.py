@@ -89,6 +89,19 @@ def _do_load_framework() -> Any:
     except AttributeError:
         lib.CGSPostKeyboardEventToProcess = None
 
+    # Direct mouse event delivery to process
+    try:
+        lib.CGSPostMouseEventToProcess.restype = ctypes.c_int
+        lib.CGSPostMouseEventToProcess.argtypes = [
+            ctypes.c_int,   # cid
+            ctypes.c_int,   # target_pid
+            ctypes.c_int,   # event_type (CGSMouseEventType)
+            ctypes.c_void_p,  # point (CGPoint pointer)
+            ctypes.c_int,   # click_count
+        ]
+    except AttributeError:
+        lib.CGSPostMouseEventToProcess = None
+
     # Connection property manipulation (micro-activation)
     try:
         lib.CGSSetConnectionProperty.restype = ctypes.c_int
@@ -249,6 +262,37 @@ def post_keyboard_event(pid: int, keycode: int, key_down: bool) -> bool:
         logger.debug("[SkyLight] CGSPostKeyboardEventToProcess(pid=%d, key=%d) failed: %d", pid, keycode, err)
         return False
     return True
+
+
+def _make_cgpoint(x: float, y: float) -> ctypes.Structure:
+    """Create a CGPoint struct for ctypes."""
+    class CGPoint(ctypes.Structure):
+        _fields_ = [("x", ctypes.c_double), ("y", ctypes.c_double)]
+    return CGPoint(x=x, y=y)
+
+
+def post_mouse_event(pid: int, event_type: int, x: float, y: float, click_count: int = 1) -> bool:
+    """Post a mouse event directly to a process via the window server.
+
+    Bypasses the CGEvent tap chain. Returns True on success.
+    Returns False if the SPI is unavailable.
+    """
+    if not is_available():
+        return False
+    if _framework.CGSPostMouseEventToProcess is None:
+        return False
+    try:
+        point = _make_cgpoint(x, y)
+        err = _framework.CGSPostMouseEventToProcess(
+            _main_cid, pid, event_type, ctypes.byref(point), click_count
+        )
+        if err != 0:
+            logger.debug("[SkyLight] CGSPostMouseEventToProcess(pid=%d, type=%d) failed: %d", pid, event_type, err)
+            return False
+        return True
+    except Exception as e:
+        logger.debug("[SkyLight] post_mouse_event failed: %s", e)
+        return False
 
 
 # ---------------------------------------------------------------------------
