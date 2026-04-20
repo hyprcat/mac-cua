@@ -2609,22 +2609,28 @@ class SessionManager:
 
             return img
 
-        # Validate window ownership before capture
-        from app._lib.screenshot import validate_and_capture as _validate_wid
-        validation = _validate_wid(target.window_id, target.pid)
-        if validation is not None:
-            _, validated_wid = validation
-            if validated_wid != target.window_id:
-                logger.info("Window ID re-resolved: %d -> %d", target.window_id, validated_wid)
-                target = AppTarget(
-                    pid=target.pid,
-                    bundle_id=target.bundle_id,
-                    window_id=validated_wid,
-                    window_pid=target.window_pid,
-                    ax_app=target.ax_app,
-                    ax_window=target.ax_window,
-                )
-                session.target = target
+        # Validate window ownership — re-resolve stale window IDs without capturing
+        from app._lib import skylight
+        if not skylight.validate_window_owner(target.window_id, target.pid):
+            logger.info("Window ID %d stale for pid %d, re-resolving", target.window_id, target.pid)
+            candidates = [
+                w for w in screenshot.list_windows(owner_pid=target.pid)
+                if w.onscreen and w.width > 0 and w.height > 0
+            ]
+            if candidates:
+                candidates.sort(key=lambda w: w.width * w.height, reverse=True)
+                new_wid = candidates[0].window_id
+                if new_wid != target.window_id:
+                    logger.info("Window ID re-resolved: %d -> %d", target.window_id, new_wid)
+                    target = AppTarget(
+                        pid=target.pid,
+                        bundle_id=target.bundle_id,
+                        window_id=new_wid,
+                        window_pid=target.window_pid,
+                        ax_app=target.ax_app,
+                        ax_window=target.ax_window,
+                    )
+                    session.target = target
 
         # Use retry policy for screenshot capture
         img = None

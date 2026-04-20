@@ -42,7 +42,7 @@ from Quartz import (
 )
 from Quartz import CGPointMake
 
-from app._lib import screenshot, skylight
+from app._lib import screenshot
 from app._lib.errors import InputError, CGEventError
 from app._lib.keys import parse_key_combo
 
@@ -466,6 +466,7 @@ def deliver_key_events(
     via tap echo, falls back to alternate pipeline on timeout, and
     optionally retries with micro-activation for qualified actions.
     """
+    from app._lib import skylight
     from app._lib.keys import decompose_modifier_sequence
     from app._lib.virtual_cursor import DeliveryMethod, ActivationPolicy
 

@@ -26,7 +26,7 @@ class DeliverKeyEventsTests(unittest.TestCase):
         self.assertTrue(result.transport_confirmed)
         self.assertFalse(result.fallback_used)
 
-    @patch("app._lib.input.skylight")
+    @patch("app._lib.skylight")
     @patch("app._lib.input._post_key_event")
     def test_falls_back_to_skylight_on_cgevent_timeout(
         self, mock_post: MagicMock, mock_skylight: MagicMock
