@@ -3038,7 +3038,34 @@ class SessionManager:
             if session.ax_outcome_monitor is not None
             else None
         )
-        cg_input.press_key(input_pid, key, source=session.event_source)
+        # Resolve key to keycode + modifiers for delivery pipeline
+        resolved_key = cg_input._coerce_text_key(key)
+        if resolved_key == " ":
+            resolved_key = "space"
+        if resolved_key is None:
+            resolved_key = key
+
+        # Use confirmed delivery pipeline when tap is available
+        if session.delivery_tap is not None and session.input_strategy is not None:
+            from app._lib.input import deliver_key_events
+            from app._lib.keys import parse_key_combo
+            try:
+                keycode, modifiers = parse_key_combo(resolved_key)
+            except ValueError as exc:
+                raise AutomationError(str(exc)) from exc
+            delivery_result = deliver_key_events(
+                pid=input_pid,
+                keycode=keycode,
+                modifiers=modifiers,
+                source=session.event_source,
+                delivery_method=session.input_strategy.delivery_method,
+                confirmation_tap=session.delivery_tap,
+                activation_policy=session.input_strategy.activation_policy,
+            )
+            if not delivery_result.transport_confirmed:
+                logger.warning("press_key transport not confirmed for %s", key)
+        else:
+            cg_input.press_key(input_pid, key, source=session.event_source)
         if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
             verification = self._verify_cgevent_contract(
                 session,
