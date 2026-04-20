@@ -16,6 +16,7 @@ import logging
 import os
 import tempfile
 import threading
+import time
 from typing import Any
 
 from PIL import Image
@@ -97,7 +98,18 @@ class ScreenCapturer:
     2. Filter for target window (SCWindow matching PID + window ID)
     3. SCScreenshotManager.captureImage with SCContentFilter
     4. CGImage -> PIL Image
+
+    Circuit breaker: after ``_CIRCUIT_BREAKER_THRESHOLD`` consecutive failures
+    (e.g. macOS screen recorder holding SCK), SCK is bypassed for
+    ``_CIRCUIT_BREAKER_COOLDOWN_S`` seconds so the CG fallback runs immediately.
     """
+
+    _CIRCUIT_BREAKER_THRESHOLD = 2
+    _CIRCUIT_BREAKER_COOLDOWN_S = 30.0
+
+    def __init__(self) -> None:
+        self._consecutive_failures = 0
+        self._circuit_open_until: float = 0.0
 
     def capture(self, window_id: int, pid: int) -> Image.Image | None:
         """Capture a window screenshot via ScreenCaptureKit.
@@ -107,15 +119,45 @@ class ScreenCapturer:
         if not is_sck_available():
             return None
 
+        # Circuit breaker: skip SCK while open
+        if self._consecutive_failures >= self._CIRCUIT_BREAKER_THRESHOLD:
+            if time.monotonic() < self._circuit_open_until:
+                logger.debug(
+                    "SCK circuit breaker open (%d consecutive failures), skipping SCK capture",
+                    self._consecutive_failures,
+                )
+                return None
+            # Cooldown expired — allow a probe attempt
+            logger.debug("SCK circuit breaker cooldown expired, probing SCK")
+
         with controller_tracer.interval("SCK Window Capture"):
             try:
-                return self._capture_impl(window_id, pid)
+                result = self._capture_impl(window_id, pid)
+                if result is not None:
+                    self._consecutive_failures = 0
+                    return result
+                # Capture returned None — count as failure
+                self._record_failure()
+                return None
             except Exception as e:
                 logger.debug(
                     "Screen capture worker failed for display %u: %s.",
                     window_id, e,
                 )
+                self._record_failure()
                 return None
+
+    def _record_failure(self) -> None:
+        self._consecutive_failures += 1
+        if self._consecutive_failures >= self._CIRCUIT_BREAKER_THRESHOLD:
+            self._circuit_open_until = time.monotonic() + self._CIRCUIT_BREAKER_COOLDOWN_S
+            logger.warning(
+                "SCK circuit breaker tripped after %d consecutive failures — "
+                "bypassing SCK for %.0fs (CG fallback active). "
+                "This is common when macOS screen recording is active.",
+                self._consecutive_failures,
+                self._CIRCUIT_BREAKER_COOLDOWN_S,
+            )
 
     def _capture_impl(self, window_id: int, pid: int) -> Image.Image | None:
         import ScreenCaptureKit as SCK
@@ -210,10 +252,12 @@ class ScreenCapturer:
             handler,
         )
 
-        event.wait(timeout=5.0)
+        event.wait(timeout=2.0)
         if error_ref:
             logger.debug("Fetching on-screen shareable content failed: %s", error_ref[0])
             return None
+        if result is None:
+            logger.debug("SCK: getShareableContent timed out (2s)")
         return result
 
     def _capture_image_sync(self, content_filter: Any, config: Any) -> Any | None:
@@ -237,10 +281,12 @@ class ScreenCapturer:
             handler,
         )
 
-        event.wait(timeout=10.0)
+        event.wait(timeout=3.0)
         if error_ref:
             logger.debug("SCK capture error: %s", error_ref[0])
             return None
+        if not cg_image_result:
+            logger.debug("SCK: captureImage timed out (3s)")
         return cg_image_result[0] if cg_image_result else None
 
     def _cgimage_to_pil(self, cg_image: Any) -> Image.Image | None:
