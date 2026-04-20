@@ -23,8 +23,40 @@
   <img src="https://img.shields.io/badge/python-3.13+-3776AB?logo=python&logoColor=white" alt="Python 3.13+">
   <img src="https://img.shields.io/badge/platform-macOS-000000?logo=apple&logoColor=white" alt="macOS">
   <img src="https://img.shields.io/badge/protocol-MCP-8B5CF6" alt="MCP">
-  <img src="https://img.shields.io/badge/tests-136%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-270%20passing-brightgreen" alt="Tests">
 </p>
+
+---
+
+## Branches
+
+mac-cua ships two branches. Pick the one that matches your needs.
+
+| | **`release`** | **`confirmed-delivery-pipeline`** |
+|---|---|---|
+| **Stability** | Production-tested, stable | Experimental, actively developed |
+| **Input delivery** | `CGEventPostToPid` with compound modifier events | Confirmed delivery pipeline: per-event transport confirmation via on-demand CGEventTap, SkyLight SPI fallback, micro-activation retry |
+| **Event source** | Shared global `CGEventSource` | Per-session isolated `CGEventSource` (no cross-session state leakage) |
+| **Verification** | Dual-monitor system (CGEvent transport + AX outcome) | Snapshot-based: trust transport, return fresh AX tree + screenshot as ground truth. Old event-driven monitors removed (raced against AX propagation, caused false negatives) |
+| **Mouse delivery** | Mouse-move pre-positioning before every click/drag/scroll | No mouse-move events (eliminated cursor teleportation). Down/up events carry point + window hints directly |
+| **Scroll** | `scroll_system` with cursor warp + line-based deltas | Pixel-based scroll with dual integer + fixed-point deltas (Chromium + Cocoa compat). Cursor warp removed |
+| **Keyboard** | Compound modifier events (modifiers as flags on keyDown/keyUp) | Same for CGEvent path (discrete flagsChanged leaked to global state). SkyLight path uses discrete modifiers |
+| **New modules** | -- | `skylight.py` (CGS SPIs), `delivery_tap.py` (transport confirmation), `confirmed_verification.py` (ActionVerifier) |
+| **Tests** | 216 passing | 270 passing |
+| **Known issues** | Event-driven verification produces false "no observed effect" errors when AX lags | Event taps add brief overhead during action delivery (~50ms). SkyLight SPIs may not be available on all macOS versions |
+
+**Use `release`** if you want proven stability and don't need cross-app Electron/Java/Qt reliability improvements.
+
+**Use `confirmed-delivery-pipeline`** if you want the latest input delivery fixes, elimination of false-negative verification errors, and per-session isolation.
+
+```bash
+# Clone and use the stable branch (default)
+git clone https://github.com/hyprcat/mac-cua.git
+cd mac-cua && git checkout release
+
+# Or use the experimental branch
+git checkout confirmed-delivery-pipeline
+```
 
 ---
 
