@@ -1,0 +1,19 @@
+[project]
+name = "mac-cua"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "mcp>=1.27.0",
+    "pillow>=12.2.0",
+    "pyobjc-framework-applicationservices>=12.1",
+    "pyobjc-framework-cocoa>=12.1",
+    "pyobjc-framework-coremedia>=12.1",
+    "pyobjc-framework-screencapturekit>=12.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
