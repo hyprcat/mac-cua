@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 BLOCKED_APPS: frozenset[str] = frozenset({
     "com.apple.keychainaccess",
     "com.apple.SecurityAgent",
-    "com.apple.systempreferences",
     "com.apple.Passwords",
     "com.apple.ScreenSharingAgent",
     "com.apple.UserNotificationCenter",

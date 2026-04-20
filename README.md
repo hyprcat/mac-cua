@@ -7,14 +7,14 @@
 <p align="center">
   <strong>The computer use agent that doesn't take over your computer.</strong><br>
   An open-source MCP server for macOS that lets AI control desktop apps<br>
-  in the background &mdash; without ever touching your mouse or stealing your focus.
+  in the background — without ever touching your mouse or stealing your focus.
 </p>
 
 <p align="center">
-  <a href="#quickstart"><strong>Quickstart</strong></a> &nbsp;&middot;&nbsp;
-  <a href="#background-first"><strong>Background-First</strong></a> &nbsp;&middot;&nbsp;
-  <a href="#tools"><strong>Tools</strong></a> &nbsp;&middot;&nbsp;
-  <a href="#setup-your-ai-tool"><strong>Setup</strong></a> &nbsp;&middot;&nbsp;
+  <a href="#quickstart"><strong>Quickstart</strong></a>  · 
+  <a href="#background-first"><strong>Background-First</strong></a>  · 
+  <a href="#tools"><strong>Tools</strong></a>  · 
+  <a href="#setup-your-ai-tool"><strong>Setup</strong></a>  · 
   <a href="#architecture"><strong>Architecture</strong></a>
 </p>
 
@@ -64,13 +64,13 @@ This is the core idea behind mac-cua, and it influences every design decision.
 
 ### How it stays invisible
 
-| What | How |
-|---|---|
-| **Mouse clicks** | `CGEventPostToPid` sends click events to the target PID. Your cursor doesn't move. |
-| **Keyboard input** | Key events are posted to the target process, not the global event stream. |
-| **Window focus** | Mac-cua reads window state without activating windows. Temporary activation happens only when strictly required (e.g., key-window targeting) and is immediately released. |
-| **Screenshots** | GPU-accelerated `ScreenCaptureKit` captures specific windows by ID &mdash; works even if the window is behind other windows. |
-| **AX tree reads** | Accessibility API queries are read-only and non-intrusive. They don't trigger any visual changes. |
+| What                     | How                                                                                                                                                                       |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Mouse clicks**   | `CGEventPostToPid` sends click events to the target PID. Your cursor doesn't move.                                                                                      |
+| **Keyboard input** | Key events are posted to the target process, not the global event stream.                                                                                                 |
+| **Window focus**   | Mac-cua reads window state without activating windows. Temporary activation happens only when strictly required (e.g., key-window targeting) and is immediately released. |
+| **Screenshots**    | GPU-accelerated `ScreenCaptureKit` captures specific windows by ID &mdash; works even if the window is behind other windows.                                            |
+| **AX tree reads**  | Accessibility API queries are read-only and non-intrusive. They don't trigger any visual changes.                                                                         |
 
 ### A note on focus
 
@@ -93,17 +93,17 @@ These flashes are sub-second and mac-cua restores your previous focus automatica
 
 ## Why mac-cua?
 
-| | Codex CUA | Perplexity Computer | mac-cua |
-|---|---|---|---|
-| **Cost** | $20&ndash;200/mo (ChatGPT tier) | $200/mo (Max only) | **Free** |
-| **Source** | Closed | Closed | **Open (Apache 2.0)** |
-| **LLM** | GPT only | Perplexity-routed | **Any model** |
-| **Protocol** | Proprietary (in-app) | Proprietary (in-app) | **MCP (open standard)** |
-| **Integration** | Codex app only | Perplexity app only | **Claude Code, Cursor, VS Code, Codex, Zed, any MCP client** |
-| **Background mode** | Yes (virtual cursor) | Unknown | **Yes (CGEventPostToPid)** |
-| **Accessibility API** | Yes (AX tree + screenshots) | Screenshots + AppleScript | **Yes (AX tree + screenshots)** |
-| **Platform** | macOS only | macOS only | **macOS** |
-| **Availability** | Not in EU/UK/CH | Waitlist (Max subscribers) | **Everyone, everywhere** |
+|                             | Codex CUA                                            | Perplexity Computer        | mac-cua                                                            |
+| --------------------------- | ---------------------------------------------------- | -------------------------- | ------------------------------------------------------------------ |
+| **Cost**              | $20&ndash;200/mo (ChatGPT tier) | $200/mo (Max only) | **Free**             |                                                                    |
+| **Source**            | Closed                                               | Closed                     | **Open (Apache 2.0)**                                        |
+| **LLM**               | GPT only                                             | Perplexity-routed          | **Any model**                                                |
+| **Protocol**          | Proprietary (in-app)                                 | Proprietary (in-app)       | **MCP (open standard)**                                      |
+| **Integration**       | Codex app only                                       | Perplexity app only        | **Claude Code, Cursor, VS Code, Codex, Zed, any MCP client** |
+| **Background mode**   | Yes (virtual cursor)                                 | Unknown                    | **Yes (CGEventPostToPid)**                                   |
+| **Accessibility API** | Yes (AX tree + screenshots)                          | Screenshots + AppleScript  | **Yes (AX tree + screenshots)**                              |
+| **Platform**          | macOS only                                           | macOS only                 | **macOS**                                                    |
+| **Availability**      | Not in EU/UK/CH                                      | Waitlist (Max subscribers) | **Everyone, everywhere**                                     |
 
 <br>
 
@@ -131,9 +131,9 @@ uv run python main.py
 
 On first launch, macOS will prompt for two permissions:
 
-| Permission | Why |
-|---|---|
-| **Accessibility** | Read UI element trees and perform actions on elements |
+| Permission                 | Why                                                   |
+| -------------------------- | ----------------------------------------------------- |
+| **Accessibility**    | Read UI element trees and perform actions on elements |
 | **Screen Recording** | Capture window screenshots without activating windows |
 
 Grant both, and the MCP server starts on stdio &mdash; ready for your AI tool to connect.
@@ -147,7 +147,7 @@ mac-cua is a standard [MCP](https://modelcontextprotocol.io/) stdio server. It w
 > **Note:** Replace `/path/to/mac-cua` with the actual path where you cloned the repo.
 
 <details>
-<summary><img src="https://img.shields.io/badge/Claude_Code-F97316?logo=anthropic&logoColor=white" alt="Claude Code" height="20"> &nbsp;<strong>Claude Code</strong></summary>
+<summary><img src="https://img.shields.io/badge/Claude_Code-F97316?logo=anthropic&logoColor=white" alt="Claude Code" height="20">  <strong>Claude Code</strong></summary>
 
 <br>
 
@@ -173,7 +173,7 @@ claude mcp add mac-cua -- uv run --directory /path/to/mac-cua python main.py
 </details>
 
 <details>
-<summary><img src="https://img.shields.io/badge/Claude_Desktop-F97316?logo=anthropic&logoColor=white" alt="Claude Desktop" height="20"> &nbsp;<strong>Claude Desktop</strong></summary>
+<summary><img src="https://img.shields.io/badge/Claude_Desktop-F97316?logo=anthropic&logoColor=white" alt="Claude Desktop" height="20">  <strong>Claude Desktop</strong></summary>
 
 <br>
 
@@ -195,7 +195,7 @@ Restart Claude Desktop after saving.
 </details>
 
 <details>
-<summary><img src="https://img.shields.io/badge/Cursor-000000?logo=cursor&logoColor=white" alt="Cursor" height="20"> &nbsp;<strong>Cursor</strong></summary>
+<summary><img src="https://img.shields.io/badge/Cursor-000000?logo=cursor&logoColor=white" alt="Cursor" height="20">  <strong>Cursor</strong></summary>
 
 <br>
 
@@ -217,7 +217,7 @@ Restart Claude Desktop after saving.
 </details>
 
 <details>
-<summary><img src="https://img.shields.io/badge/VS_Code-007ACC?logo=visual-studio-code&logoColor=white" alt="VS Code" height="20"> &nbsp;<strong>VS Code (GitHub Copilot)</strong></summary>
+<summary><img src="https://img.shields.io/badge/VS_Code-007ACC?logo=visual-studio-code&logoColor=white" alt="VS Code" height="20">  <strong>VS Code (GitHub Copilot)</strong></summary>
 
 <br>
 
@@ -239,7 +239,7 @@ Requires the [GitHub Copilot](https://marketplace.visualstudio.com/items?itemNam
 </details>
 
 <details>
-<summary><img src="https://img.shields.io/badge/Windsurf-00C4B4?logoColor=white" alt="Windsurf" height="20"> &nbsp;<strong>Windsurf</strong></summary>
+<summary><img src="https://img.shields.io/badge/Windsurf-00C4B4?logoColor=white" alt="Windsurf" height="20">  <strong>Windsurf</strong></summary>
 
 <br>
 
@@ -261,7 +261,7 @@ Or edit `~/.codeium/windsurf/mcp_config.json` directly.
 </details>
 
 <details>
-<summary><img src="https://img.shields.io/badge/Codex_(OpenAI)-412991?logo=openai&logoColor=white" alt="Codex" height="20"> &nbsp;<strong>Codex (OpenAI CLI)</strong></summary>
+<summary><img src="https://img.shields.io/badge/Codex_(OpenAI)-412991?logo=openai&logoColor=white" alt="Codex" height="20">  <strong>Codex (OpenAI CLI)</strong></summary>
 
 <br>
 
@@ -281,7 +281,7 @@ Create or edit `~/.codex/config.json`:
 </details>
 
 <details>
-<summary><img src="https://img.shields.io/badge/Amp-FF6B00?logoColor=white" alt="Amp" height="20"> &nbsp;<strong>Amp</strong></summary>
+<summary><img src="https://img.shields.io/badge/Amp-FF6B00?logoColor=white" alt="Amp" height="20">  <strong>Amp</strong></summary>
 
 <br>
 
@@ -301,7 +301,7 @@ Create `.amp/mcp.json` in your project root (or `~/.amp/mcp.json` globally):
 </details>
 
 <details>
-<summary><img src="https://img.shields.io/badge/Zed-084CCF?logo=zed&logoColor=white" alt="Zed" height="20"> &nbsp;<strong>Zed</strong></summary>
+<summary><img src="https://img.shields.io/badge/Zed-084CCF?logo=zed&logoColor=white" alt="Zed" height="20">  <strong>Zed</strong></summary>
 
 <br>
 
@@ -323,7 +323,7 @@ Add to your Zed `settings.json` (**Zed > Settings > Open Settings**):
 </details>
 
 <details>
-<summary><img src="https://img.shields.io/badge/Cline-5B5FC7?logoColor=white" alt="Cline" height="20"> &nbsp;<strong>Cline (VS Code Extension)</strong></summary>
+<summary><img src="https://img.shields.io/badge/Cline-5B5FC7?logoColor=white" alt="Cline" height="20">  <strong>Cline (VS Code Extension)</strong></summary>
 
 <br>
 
@@ -343,7 +343,7 @@ Open Cline settings in VS Code, navigate to **MCP Servers**, and add:
 </details>
 
 <details>
-<summary><img src="https://img.shields.io/badge/Any_MCP_Client-gray" alt="Other" height="20"> &nbsp;<strong>Any other MCP client</strong></summary>
+<summary><img src="https://img.shields.io/badge/Any_MCP_Client-gray" alt="Other" height="20">  <strong>Any other MCP client</strong></summary>
 
 <br>
 
@@ -411,22 +411,22 @@ mac-cua reads apps through two complementary channels and acts through backgroun
 
 ### Discovery
 
-| Tool | Description |
-|---|---|
-| `list_apps` | List running and recently-used apps with bundle IDs and usage stats |
-| `get_app_state` | Capture a window's accessibility tree + screenshot. **Called each turn before interaction.** |
+| Tool              | Description                                                                                       |
+| ----------------- | ------------------------------------------------------------------------------------------------- |
+| `list_apps`     | List running and recently-used apps with bundle IDs and usage stats                               |
+| `get_app_state` | Capture a window's accessibility tree + screenshot.**Called each turn before interaction.** |
 
 ### Interaction
 
-| Tool | Description |
-|---|---|
-| `click` | Click by element index or pixel coordinates. Supports double-click, right-click. All clicks are background-targeted. |
-| `type_text` | Type literal text via background keyboard input &mdash; keys go to the target process, not your focused app |
-| `press_key` | Send key combos in [xdotool syntax](https://linux.die.net/man/1/xdotool) (`super+c`, `Return`, `Tab`) to a specific process |
-| `set_value` | Directly set an accessibility element's value &mdash; no focus or typing needed |
-| `scroll` | Scroll a specific element by direction and page count |
-| `drag` | Drag between two pixel coordinates |
-| `perform_secondary_action` | Invoke non-primary AX actions (expand, collapse, zoom, raise) |
+| Tool                         | Description                                                                                                                   |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `click`                    | Click by element index or pixel coordinates. Supports double-click, right-click. All clicks are background-targeted.          |
+| `type_text`                | Type literal text via background keyboard input&mdash; keys go to the target process, not your focused app                    |
+| `press_key`                | Send key combos in[xdotool syntax](https://linux.die.net/man/1/xdotool) (`super+c`, `Return`, `Tab`) to a specific process |
+| `set_value`                | Directly set an accessibility element's value&mdash; no focus or typing needed                                                |
+| `scroll`                   | Scroll a specific element by direction and page count                                                                         |
+| `drag`                     | Drag between two pixel coordinates                                                                                            |
+| `perform_secondary_action` | Invoke non-primary AX actions (expand, collapse, zoom, raise)                                                                 |
 
 ### Reliability Hierarchy
 
@@ -486,25 +486,25 @@ Layer 3 ─ Platform Backend      app/_lib/             One module per macOS sub
 
 ### Platform Backend Modules
 
-| Module | Responsibility |
-|---|---|
-| `accessibility.py` | AX tree walking, batch attribute reads, element actions |
-| `screenshot.py` | `CGWindowListCreateImage`, window ID resolution |
-| `screen_capture.py` | GPU-accelerated `ScreenCaptureKit` capture |
-| `input.py` | `CGEventPostToPid` &mdash; background mouse, keyboard, typing |
-| `apps.py` | `NSWorkspace` app discovery, launch, PID/AX caching |
-| `focus.py` | Focus tracking, user interruption detection, conflict resolution |
-| `virtual_cursor.py` | Background cursor, input strategy, app-type detection |
-| `selection.py` | Text selection extraction and formatting |
-| `tree.py` | AX tree &rarr; indexed text serialization |
-| `pruning.py` | Smart tree pruning to fit LLM context windows |
-| `keys.py` | xdotool syntax &rarr; CGKeyCode + modifier mapping |
-| `event_tap.py` | `CGEventTap` wrapper with auto-reenable |
-| `safety.py` | App/URL blocklists, SSRF protection |
-| `retry.py` | Exponential backoff policies |
-| `elicitation.py` | App approval store (session + persistent) |
-| `lifecycle.py` | Per-turn cleanup and step tracking |
-| `errors.py` | Typed exceptions and AX error code table |
+| Module                | Responsibility                                                   |
+| --------------------- | ---------------------------------------------------------------- |
+| `accessibility.py`  | AX tree walking, batch attribute reads, element actions          |
+| `screenshot.py`     | `CGWindowListCreateImage`, window ID resolution                |
+| `screen_capture.py` | GPU-accelerated `ScreenCaptureKit` capture                     |
+| `input.py`          | `CGEventPostToPid` &mdash; background mouse, keyboard, typing  |
+| `apps.py`           | `NSWorkspace` app discovery, launch, PID/AX caching            |
+| `focus.py`          | Focus tracking, user interruption detection, conflict resolution |
+| `virtual_cursor.py` | Background cursor, input strategy, app-type detection            |
+| `selection.py`      | Text selection extraction and formatting                         |
+| `tree.py`           | AX tree&rarr; indexed text serialization                         |
+| `pruning.py`        | Smart tree pruning to fit LLM context windows                    |
+| `keys.py`           | xdotool syntax&rarr; CGKeyCode + modifier mapping                |
+| `event_tap.py`      | `CGEventTap` wrapper with auto-reenable                        |
+| `safety.py`         | App/URL blocklists, SSRF protection                              |
+| `retry.py`          | Exponential backoff policies                                     |
+| `elicitation.py`    | App approval store (session + persistent)                        |
+| `lifecycle.py`      | Per-turn cleanup and step tracking                               |
+| `errors.py`         | Typed exceptions and AX error code table                         |
 
 ### Key Design Decisions
 
@@ -609,4 +609,4 @@ If you find mac-cua useful, consider giving it a star. It helps others discover 
 
 mac-cua was inspired by [Codex computer use](https://openai.com/index/codex/) (OpenAI, April 2026) and [Personal Computer](https://www.perplexity.ai/personal-computer) (Perplexity, April 2026). Both showed that background desktop automation is the future &mdash; mac-cua brings that capability to everyone as an open-source MCP tool that works with any LLM.
 
-Built by [Midsphere AI](https://www.midsphere.ai) with [MCP](https://modelcontextprotocol.io/) for universal LLM compatibility, [PyObjC](https://pyobjc.readthedocs.io/) for macOS integration, and [ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit) for GPU-accelerated background capture.
+Built with [MCP](https://modelcontextprotocol.io/) for universal LLM compatibility, [PyObjC](https://pyobjc.readthedocs.io/) for macOS integration, and [ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit) for GPU-accelerated background capture.

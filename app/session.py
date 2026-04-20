@@ -828,22 +828,42 @@ class SessionManager:
     def _focus_node_for_keyboard_input(self, session: AppSession, node: Node) -> bool:
         """Focus an element for keyboard input WITHOUT activating the app.
 
-        Uses CGEventPostToPid click (background) as the primary method.
+        Prefers AX focus (no activation) over CGEvent click (may activate).
         AXPress is avoided because it causes many apps to self-activate,
         stealing focus from the user's current app.
         """
-        # Primary: background click at element center (no activation)
-        if self._background_click_node(session, node):
-            time.sleep(0.05)
-            return True
-        # Fallback: AX focus attribute (doesn't activate most apps)
+        # Primary: AX focus attribute (doesn't activate the app)
         try:
             accessibility.set_attribute(node, "AXFocused", True)
             time.sleep(0.02)
             return True
         except Exception:
             pass
+        # Fallback: background click at element center (may cause activation)
+        if self._background_click_node(session, node):
+            time.sleep(0.05)
+            return True
         return False
+
+    def _ensure_target_window_focus(self, session: AppSession) -> None:
+        """Set AX focus on the target window so keyboard events route correctly.
+
+        CGEventPostToPid delivers keyboard events to the PID's key window.
+        Setting AXFocused/AXMain on our target window changes the app's
+        internal focus state without activating the app or stealing focus.
+        """
+        if session.target.ax_window is None:
+            return
+        from ApplicationServices import AXUIElementSetAttributeValue
+        try:
+            AXUIElementSetAttributeValue(session.target.ax_window, "AXFocused", True)
+            return
+        except Exception:
+            pass
+        try:
+            AXUIElementSetAttributeValue(session.target.ax_window, "AXMain", True)
+        except Exception:
+            logger.debug("Cannot set window focus for %s", session.target.bundle_id)
 
     def _build_app_state(self, target: AppTarget, window_title: str | None) -> AppState:
         """Build geometry metadata for the app state response."""
@@ -1362,6 +1382,8 @@ class SessionManager:
                     f"Try set_value instead."
                 )
 
+        # Ensure target window is key within its PID before keyboard CGEvent
+        self._ensure_target_window_focus(session)
         cg_input.type_text(t.window_pid, text)
         if el_idx is None:
             return f"Typed {text!r} into the current focused element"
@@ -1433,6 +1455,8 @@ class SessionManager:
                     f"Cannot target element {el_idx} for key input without activating the app."
                 )
 
+        # Ensure target window is key within its PID before keyboard CGEvent
+        self._ensure_target_window_focus(session)
         cg_input.press_key(t.window_pid, key)
         if el_idx is None:
             return f"Pressed {key} in {t.bundle_id} (background key event)"
