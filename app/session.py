@@ -2963,16 +2963,27 @@ class SessionManager:
                 ActionVerificationResult.CONFIRMED,
                 ActionVerificationResult.TRANSIENT_OPENED,
             }:
-                raise AutomationError("type_text had no observed effect")
-        # Post-snapshot and verdict (alongside existing verification)
-        after_snapshot_type = self._capture_element_snapshot(session, type_target_node)
-        from app._lib.confirmed_verification import ExpectedDiff
-        self._compute_delivery_verdict(
-            session, before_snapshot_type, after_snapshot_type,
-            transport_confirmed=True,
-            fallback_used=False,
-            expected=ExpectedDiff.VALUE_CHANGED,
-        )
+                # Check new ActionVerifier before raising — old monitor may false-negative
+                after_snapshot_type = self._capture_element_snapshot(session, type_target_node)
+                from app._lib.confirmed_verification import ExpectedDiff, DeliveryVerdict
+                verdict = self._compute_delivery_verdict(
+                    session, before_snapshot_type, after_snapshot_type,
+                    transport_confirmed=True,
+                    fallback_used=False,
+                    expected=ExpectedDiff.VALUE_CHANGED,
+                )
+                if verdict not in {DeliveryVerdict.CONFIRMED, DeliveryVerdict.CONFIRMED_VIA_FALLBACK}:
+                    raise AutomationError("type_text had no observed effect")
+                logger.debug("type_text: old monitor said no effect but ActionVerifier confirmed state change")
+        else:
+            after_snapshot_type = self._capture_element_snapshot(session, type_target_node)
+            from app._lib.confirmed_verification import ExpectedDiff
+            self._compute_delivery_verdict(
+                session, before_snapshot_type, after_snapshot_type,
+                transport_confirmed=True,
+                fallback_used=False,
+                expected=ExpectedDiff.VALUE_CHANGED,
+            )
         if el_idx is None:
             return f"Typed {text!r} into the current focused element"
         return f"Typed {text!r} into element {el_idx} (background key events)"
@@ -3180,16 +3191,28 @@ class SessionManager:
                 ActionVerificationResult.CONFIRMED,
                 ActionVerificationResult.TRANSIENT_CLOSED,
             }:
-                raise AutomationError("press_key had no observed effect")
-        # Post-snapshot and verdict (alongside existing verification)
-        after_snapshot = self._capture_element_snapshot(session, target_node)
-        from app._lib.confirmed_verification import ExpectedDiff
-        self._compute_delivery_verdict(
-            session, before_snapshot, after_snapshot,
-            transport_confirmed=delivery_result.transport_confirmed if delivery_result is not None else True,
-            fallback_used=delivery_result.fallback_used if delivery_result is not None else False,
-            expected=ExpectedDiff.LAYOUT_OR_MENU,
-        )
+                # Check new ActionVerifier before raising — old monitor may false-negative
+                after_snapshot = self._capture_element_snapshot(session, target_node)
+                from app._lib.confirmed_verification import ExpectedDiff, DeliveryVerdict
+                verdict = self._compute_delivery_verdict(
+                    session, before_snapshot, after_snapshot,
+                    transport_confirmed=delivery_result.transport_confirmed if delivery_result is not None else True,
+                    fallback_used=delivery_result.fallback_used if delivery_result is not None else False,
+                    expected=ExpectedDiff.LAYOUT_OR_MENU,
+                )
+                if verdict not in {DeliveryVerdict.CONFIRMED, DeliveryVerdict.CONFIRMED_VIA_FALLBACK}:
+                    raise AutomationError("press_key had no observed effect")
+                logger.debug("press_key: old monitor said no effect but ActionVerifier confirmed state change")
+        else:
+            # No old verification — still compute verdict for diagnostics
+            after_snapshot = self._capture_element_snapshot(session, target_node)
+            from app._lib.confirmed_verification import ExpectedDiff
+            self._compute_delivery_verdict(
+                session, before_snapshot, after_snapshot,
+                transport_confirmed=delivery_result.transport_confirmed if delivery_result is not None else True,
+                fallback_used=delivery_result.fallback_used if delivery_result is not None else False,
+                expected=ExpectedDiff.LAYOUT_OR_MENU,
+            )
         if el_idx is None:
             return f"Pressed {key} in {t.bundle_id} (background key event)"
         return f"Pressed {key} on element {el_idx} (background key event)"
