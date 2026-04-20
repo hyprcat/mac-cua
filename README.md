@@ -32,7 +32,7 @@
 
 > **Task:** Search Google for the population of Tokyo, calculate what percentage that is of the world population (8.1 billion), write the result in Notes, then open the Wikipedia page for Tokyo in Safari and find the mayor's name. Only CUA tools — no other tools allowed.
 
-<video src="assets/demo.mp4" width="100%" controls></video>
+https://github.com/hyprcat/mac-cua/raw/release/assets/demo.mp4
 
 **Result from Claude:**
 
