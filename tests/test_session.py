@@ -1433,6 +1433,7 @@ class SessionManagerTests(unittest.TestCase):
             button="left",
             count=1,
             screenshot_size=None,
+            source=None,
         )
 
     def test_click_point_for_node_uses_visible_intersection(self) -> None:

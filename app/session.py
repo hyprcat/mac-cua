@@ -250,6 +250,9 @@ class AppSession:
     # Values: "ax", "pid", "system", None
     scroll_method: str | None = field(default=None, repr=False)
     last_action_verification: ActionVerificationResult | None = field(default=None, repr=False)
+    # Confirmed delivery pipeline — per-session event source and transport confirmation
+    event_source: Any = field(default=None, repr=False)
+    delivery_tap: Any = field(default=None, repr=False)  # DeliveryConfirmationTap
     pending_transient_source: TransientSource | None = field(default=None, repr=False)
     user_state_invalidated: bool = False
     user_state_invalidated_message: str | None = None
@@ -436,6 +439,27 @@ class SessionManager:
                 session.target.bundle_id, session.app_type.value,
             )
 
+        # Set up per-session event source and delivery confirmation tap
+        if session.event_source is None:
+            from app._lib.input import create_event_source
+            from app._lib.delivery_tap import DeliveryConfirmationTap
+            session.event_source = create_event_source()
+            try:
+                from Quartz import CGEventSourceGetSourceStateID
+                source_state_id = CGEventSourceGetSourceStateID(session.event_source)
+            except (ImportError, Exception):
+                source_state_id = 0
+            if source_state_id != 0:
+                tap = DeliveryConfirmationTap(expected_source_state_id=source_state_id)
+                if tap.start():
+                    session.delivery_tap = tap
+                    logger.debug(
+                        "Delivery confirmation tap started for %s (source_state_id=%d)",
+                        session.target.bundle_id, source_state_id,
+                    )
+                else:
+                    logger.debug("Delivery confirmation tap failed to start for %s", session.target.bundle_id)
+
     def _teardown_observer(self, session: AppSession) -> None:
         """Stop and clean up the observer for a session."""
         if session.observer is not None:
@@ -463,6 +487,10 @@ class SessionManager:
         if session.cgevent_outcome_monitor is not None:
             session.cgevent_outcome_monitor.stop()
             session.cgevent_outcome_monitor = None
+        if session.delivery_tap is not None:
+            session.delivery_tap.stop()
+            session.delivery_tap = None
+        session.event_source = None
 
     def _activate_focus_enforcement(self, session: AppSession) -> None:
         """Step 6: Monitor focus without activating the target app.
@@ -1059,6 +1087,7 @@ class SessionManager:
                 button=button,
                 count=count,
                 window_id=session.target.window_id,
+                source=session.event_source,
             )
             if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
                 transient_source = None
@@ -2668,6 +2697,7 @@ class SessionManager:
                     button=button,
                     count=count,
                     screenshot_size=session.screenshot_size,
+                    source=session.event_source,
                 )
                 if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
                     verification = self._verify_cgevent_contract(
@@ -2710,6 +2740,7 @@ class SessionManager:
                         button=button,
                         count=count,
                         screenshot_size=session.screenshot_size,
+                        source=session.event_source,
                     )
                     if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
                         verification = self._verify_cgevent_contract(
@@ -2813,7 +2844,7 @@ class SessionManager:
             if session.ax_outcome_monitor is not None
             else None
         )
-        cg_input.type_text(input_pid, text)
+        cg_input.type_text(input_pid, text, source=session.event_source)
         if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
             direct_verifier = None
             if el_idx is not None and node.ax_ref is not None:
@@ -2990,7 +3021,7 @@ class SessionManager:
             if session.ax_outcome_monitor is not None
             else None
         )
-        cg_input.press_key(input_pid, key)
+        cg_input.press_key(input_pid, key, source=session.event_source)
         if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
             verification = self._verify_cgevent_contract(
                 session,
@@ -3039,6 +3070,7 @@ class SessionManager:
                 to_x,
                 to_y,
                 screenshot_size=session.screenshot_size,
+                source=session.event_source,
             )
             if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
                 verification = self._verify_cgevent_contract(
@@ -3073,6 +3105,7 @@ class SessionManager:
                 to_x,
                 to_y,
                 screenshot_size=session.screenshot_size,
+                source=session.event_source,
             )
             if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
                 verification = self._verify_cgevent_contract(
@@ -3450,6 +3483,7 @@ class SessionManager:
                 direction,
                 pixels,
                 window_id=session.target.window_id,
+                source=session.event_source,
             )
             if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
                 verification = self._verify_cgevent_contract(
@@ -3495,6 +3529,7 @@ class SessionManager:
                 direction,
                 clicks=SCROLL_CLICKS_PER_PAGE,
                 window_id=session.target.window_id,
+                source=session.event_source,
             )
             if feature_flags.cgevent_action_verification and session.cgevent_outcome_monitor is not None:
                 verification = self._verify_cgevent_contract(
