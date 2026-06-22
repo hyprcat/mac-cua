@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/home/atg/Github/mac-cua/swift/.build/x86_64-unknown-linux-gnu/debug/mac_cuaPackageTests.build/primary.swiftdeps"
+  },
+  "/home/atg/Github/mac-cua/swift/.build/x86_64-unknown-linux-gnu/debug/mac-cuaPackageTests.derived/runner.swift": {
+    "dependencies": "/home/atg/Github/mac-cua/swift/.build/x86_64-unknown-linux-gnu/debug/mac_cuaPackageTests.build/runner.d",
+    "object": "/home/atg/Github/mac-cua/swift/.build/x86_64-unknown-linux-gnu/debug/mac_cuaPackageTests.build/runner.swift.o",
+    "swiftmodule": "/home/atg/Github/mac-cua/swift/.build/x86_64-unknown-linux-gnu/debug/mac_cuaPackageTests.build/runner~partial.swiftmodule",
+    "swift-dependencies": "/home/atg/Github/mac-cua/swift/.build/x86_64-unknown-linux-gnu/debug/mac_cuaPackageTests.build/runner.swiftdeps",
+    "diagnostics": "/home/atg/Github/mac-cua/swift/.build/x86_64-unknown-linux-gnu/debug/mac_cuaPackageTests.build/runner.dia"
+  }
+}

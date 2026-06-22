@@ -1,0 +1,3 @@
+module mac_cuaPackageTests {
+    header "/home/atg/Github/mac-cua/swift/.build/x86_64-unknown-linux-gnu/debug/mac_cuaPackageTests.build/include/mac-cuaPackageTests-Swift.h"
+}
