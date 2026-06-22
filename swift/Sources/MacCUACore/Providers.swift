@@ -1,0 +1,360 @@
+import Foundation
+
+// Protocol seams for every macOS-touching capability the orchestration spine
+// needs. `MacCUAServer` depends ONLY on these protocols; `MacCUAKit` (Phase 3+)
+// provides the real macOS implementations, and the test target provides fakes.
+//
+// This is the core de-risking move from SWIFT_PORT_DESIGN.md §4.2: roughly half
+// the codebase — and the entire `SessionManager.execute()` spine — builds and
+// unit-tests on Linux because the framework layer is hidden behind these seams.
+//
+// Hard contracts carried over from the Prime Invariant (§3):
+//   - InputProvider delivers ONLY per-pid (Invariant 1), never warps the cursor
+//     (Invariant 2), modifiers ride as flags (Invariant 3).
+//   - Reads never activate (Invariant 7); capture never foregrounds (Invariant 13).
+//   - AX refs never reach the model (Invariant 8) — they stay behind AXElementRef.
+//   - SkyLight symbols are individually optional (Invariant 17); no micro-activation
+//     anywhere (Invariant 18).
+
+// MARK: - Opaque platform seams
+
+/// Opaque per-session synthetic-event source (a real `CGEventSource` in Kit).
+/// Carried through input calls so the confirmation tap can match our private
+/// state id (Invariant 4) and never confuse user input with the agent's.
+public protocol EventSource: AnyObject {}
+
+/// Opaque captured window image (a real `CGImage`/bitmap in Kit). Kept abstract
+/// so the spine can size, encode and attach it without a framework dependency.
+public protocol CapturedImage: AnyObject {
+    var width: Int { get }
+    var height: Int { get }
+    /// Base64-encoded PNG, ready to attach as an MCP `ImageContent` block.
+    func pngBase64() -> String
+}
+
+/// Precise editable-text manipulation over an AX text element (a wrapper around
+/// `EditableTextObject` in Python). Methods throw `AutomationError(.staleReference)`
+/// on AX `-25205`/`-25212` so callers can recover (Invariant 10).
+public protocol EditableText: AnyObject {
+    var text: String { get }
+    func setText(_ text: String) throws
+    func insertText(_ text: String) throws
+}
+
+// MARK: - Exchanged value types
+
+/// One app entry for `list_apps` and for resolution. `running` entries carry a
+/// `pid`; recent (last-14-days) entries carry usage metadata.
+public struct AppInfo: Equatable, Sendable {
+    public var name: String
+    public var bundleId: String
+    public var pid: Int?
+    public var running: Bool
+    public var lastUsed: Date?
+    public var useCount: Int?
+
+    public init(
+        name: String,
+        bundleId: String,
+        pid: Int? = nil,
+        running: Bool = false,
+        lastUsed: Date? = nil,
+        useCount: Int? = nil
+    ) {
+        self.name = name
+        self.bundleId = bundleId
+        self.pid = pid
+        self.running = running
+        self.lastUsed = lastUsed
+        self.useCount = useCount
+    }
+}
+
+/// A window as seen by the window server (CGWindowList). Geometry is in screen
+/// points, top-left origin.
+public struct WindowInfo: Equatable, Sendable {
+    public var windowId: Int
+    public var ownerPid: Int
+    public var ownerName: String?
+    public var title: String?
+    public var x: Double
+    public var y: Double
+    public var width: Double
+    public var height: Double
+    public var onscreen: Bool
+
+    public init(
+        windowId: Int,
+        ownerPid: Int,
+        ownerName: String? = nil,
+        title: String? = nil,
+        x: Double,
+        y: Double,
+        width: Double,
+        height: Double,
+        onscreen: Bool
+    ) {
+        self.windowId = windowId
+        self.ownerPid = ownerPid
+        self.ownerName = ownerName
+        self.title = title
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        self.onscreen = onscreen
+    }
+}
+
+/// Result of an event-driven settle wait (see `SettleMonitor`).
+public enum SettleResult: String, Sendable, Equatable {
+    case settled      // quiet period elapsed after observed change
+    case timeout      // hit the per-tool budget
+    case cancelled    // explicitly cancelled (e.g. user interruption)
+    case noChange     // nothing observed since the mark
+}
+
+/// What outcome we expect after delivering an action, used by `OutcomeMonitor`
+/// to distinguish "delivered, no effect" from "not delivered" (Invariants 20-21).
+public struct VerificationContract: Sendable {
+    public var expectTransientOpen: Bool
+    public var expectTransientClose: Bool
+    public var allowInvalidation: Bool
+    public var allowFocusChange: Bool
+    public var allowValueChange: Bool
+    /// Optional synchronous read-back check (e.g. value matches, element selected).
+    public var directVerifier: (@Sendable () -> Bool)?
+
+    public init(
+        expectTransientOpen: Bool = false,
+        expectTransientClose: Bool = false,
+        allowInvalidation: Bool = true,
+        allowFocusChange: Bool = true,
+        allowValueChange: Bool = true,
+        directVerifier: (@Sendable () -> Bool)? = nil
+    ) {
+        self.expectTransientOpen = expectTransientOpen
+        self.expectTransientClose = expectTransientClose
+        self.allowInvalidation = allowInvalidation
+        self.allowFocusChange = allowFocusChange
+        self.allowValueChange = allowValueChange
+        self.directVerifier = directVerifier
+    }
+}
+
+/// Outcome of post-delivery verification. Mirrors `ActionVerificationResult`.
+/// `noEffect` = transport confirmed but state unchanged (Invariant 20).
+public enum ActionVerificationResult: String, Sendable, Equatable {
+    case confirmed
+    case noEffect
+    case transientOpened
+    case transientClosed
+    case stale
+    case timeout
+}
+
+// MARK: - AppResolver (apps.py)
+
+/// Resolves and launches applications WITHOUT activation (Invariant 14). The
+/// only re-activation it permits is restoring the user's previous frontmost app
+/// (Invariant 15).
+public protocol AppResolver: AnyObject {
+    /// Currently running apps, with live pids.
+    func listRunningApps() -> [AppInfo]
+    /// Apps used in the last ~14 days, with usage metadata (may overlap running).
+    func listRecentApps() -> [AppInfo]
+    /// Resolve a name/bundle-id hint to a concrete app (running or installed).
+    func resolveApp(_ hint: String) throws -> AppInfo
+    /// AppInfo for a known live pid, or nil if it is gone.
+    func resolveRunningAppByPid(_ pid: Int) -> AppInfo?
+    /// Launch with `activates=false` (+ `open -g` fallback). Returns the pid.
+    func launchApp(bundleId: String) throws -> Int
+    /// Get (or create + cache) the AX application element for a bundle/pid.
+    func getAXApp(bundleId: String, knownPid: Int?) throws -> (axApp: AXElementRef, pid: Int)
+    /// Get the AX application element for a pid (XPC/helper windows).
+    func getAXAppForPid(_ pid: Int, bundleId: String?) throws -> (axApp: AXElementRef, pid: Int)
+    /// The user's current frontmost app (pure read — no activation).
+    func getFrontmostApp() -> AppInfo?
+    /// Restore a previously-captured frontmost app (the ONLY allowed activation).
+    func restoreFrontmostApp(_ app: AppInfo?)
+    /// Check (and optionally prompt for) Accessibility permission.
+    func checkAccessibilityPermission(prompt: Bool) -> Bool
+}
+
+// MARK: - AccessibilityProvider (accessibility.py)
+
+/// AX tree walking, element queries and actions. Reads never activate
+/// (Invariant 7); writes are pid-scoped, ref-counted assertions (Invariant 11);
+/// `-25205`/`-25212` surface as `AutomationError(.staleReference)` (Invariant 10).
+public protocol AccessibilityProvider: AnyObject {
+    // Tree (reads)
+    func walkTree(
+        axElement: AXElementRef,
+        targetPid: Int?,
+        maxDepth: Int,
+        maxNodes: Int,
+        includeActions: Bool,
+        includeStates: Bool
+    ) throws -> [Node]
+    func getKeyWindow(axApp: AXElementRef) -> AXElementRef?
+    func getWindows(axApp: AXElementRef) -> [AXElementRef]
+    func getMenuBar(axApp: AXElementRef) -> AXElementRef?
+    func getWindowTitle(axWindow: AXElementRef) -> String?
+
+    // Element queries (reads)
+    func getFocusedElement(axApp: AXElementRef, tree: [Node]) -> Int?
+    func getElementFrame(node: Node) -> Rect?
+    func elementAtPosition(axApp: AXElementRef, x: Double, y: Double) -> AXElementRef?
+    func getPid(axElement: AXElementRef) -> Int?
+    func refsEqual(_ a: AXElementRef?, _ b: AXElementRef?) -> Bool
+    func nodeFromRef(_ element: AXElementRef, depth: Int, index: Int) throws -> Node
+    func getActionNamesForRef(_ element: AXElementRef) -> [String]
+    func getParentRef(_ element: AXElementRef) -> AXElementRef?
+    func getChildren(_ element: AXElementRef) -> [AXElementRef]
+    func hasScrollbarRef(_ element: AXElementRef) -> Bool
+    func getAttributeValue(_ element: AXElementRef, _ attr: String) -> String?
+    func isAttributeSettable(node: Node, _ attr: String) -> Bool
+
+    // Writes (pid-scoped, ref-counted assertions)
+    func performAction(node: Node, action: String) throws
+    func performActionOnRef(_ axRef: AXElementRef, action: String) throws
+    func setAttribute(node: Node, _ attr: String, _ value: String) throws
+
+    // Editable text + content extraction
+    func makeEditableText(element: AXElementRef, pid: Int?) -> EditableText?
+    func extractWebAreaText(_ element: AXElementRef, targetPid: Int?) -> String?
+    func extractTextAreaContent(_ element: AXElementRef, targetPid: Int?) -> String?
+    func getWebURL(_ element: AXElementRef) -> String?
+}
+
+// MARK: - InputProvider (input.py)
+
+/// Synthetic input via `CGEventPostToPid` ONLY (Invariant 1). Never warps the
+/// cursor (Invariant 2); modifiers ride as flags on the key event (Invariant 3);
+/// per-session private source (Invariant 4); dual scroll deltas (Invariant 6).
+/// There is NO foregrounding fallback (Invariant 18) — on failure these throw.
+public protocol InputProvider: AnyObject {
+    func createEventSource() -> EventSource
+
+    /// Click in screenshot-pixel space (window-relative, top-left origin).
+    func clickAt(
+        pid: Int, windowId: Int, x: Double, y: Double,
+        button: String, count: Int,
+        screenshotSize: (width: Int, height: Int)?,
+        source: EventSource?
+    ) throws
+
+    /// Click at an absolute screen point (from an AX frame center).
+    func clickAtScreenPoint(
+        pid: Int, x: Double, y: Double,
+        button: String, count: Int,
+        windowId: Int?, source: EventSource?
+    ) throws
+
+    func drag(
+        pid: Int, windowId: Int,
+        fromX: Double, fromY: Double, toX: Double, toY: Double,
+        screenshotSize: (width: Int, height: Int)?,
+        source: EventSource?
+    ) throws
+
+    func pressKey(pid: Int, key: String, source: EventSource?) throws
+    func typeText(pid: Int, text: String, source: EventSource?) throws
+
+    func scrollPid(
+        pid: Int, x: Double, y: Double,
+        direction: String, clicks: Int,
+        windowId: Int?, source: EventSource?
+    ) throws
+    func scrollPidPixel(
+        pid: Int, x: Double, y: Double,
+        direction: String, pixels: Int,
+        windowId: Int?, source: EventSource?
+    ) throws
+
+    /// Convert screenshot-pixel coords to absolute screen coords.
+    func windowToScreenCoords(
+        windowId: Int, x: Double, y: Double,
+        screenshotSize: (width: Int, height: Int)?
+    ) -> (x: Double, y: Double)?
+}
+
+// MARK: - CaptureProvider (screenshot.py + screen_capture.py)
+
+/// Window capture + window-server metadata. Reads a window's backing store by id
+/// WITHOUT foregrounding it, cursor excluded (Invariant 13).
+public protocol CaptureProvider: AnyObject {
+    func listWindows(ownerPid: Int?) -> [WindowInfo]
+    func getWindowBounds(windowId: Int) -> Rect?
+    func getWindowPid(windowId: Int) -> Int?
+    func findWindowIdForAXWindow(pid: Int, axWindow: AXElementRef) -> Int?
+    /// Capture a window by id; returns nil on permission/invalid-window failure.
+    func captureWindow(windowId: Int, includeCursor: Bool) throws -> CapturedImage?
+    func checkScreenRecordingPermission() -> Bool
+    func promptScreenRecordingPermission() -> Bool
+}
+
+// MARK: - SelectionProvider (selection.py)
+
+/// System text-selection tracking. `format_selection` is pure logic and lives in
+/// Core; extraction wraps AX reads.
+public protocol SelectionProvider: AnyObject {
+    func startObserving(pid: Int)
+    func stopObserving()
+    /// Current system selection as model-facing formatted text, or nil.
+    func currentSelection() -> String?
+}
+
+// MARK: - SettleMonitor (observer.py, §5.3 polling design)
+
+/// Event-driven settle by OBSERVATION, not AX notifications (§5.3): poll a cheap
+/// tree fingerprint until two consecutive polls match, bounded by the per-tool
+/// budget. Replaces the unreliable `AXObserver` correctness path.
+public protocol SettleMonitor: AnyObject {
+    /// Wait until the UI quiesces or the budget elapses.
+    func waitForSettle(context: String, timeout: Double, quietPeriod: Double) -> SettleResult
+    /// Whether the cached tree should be considered invalidated (liveness-driven).
+    var isInvalidated: Bool { get }
+    func reset()
+    func cancel()
+}
+
+// MARK: - OutcomeMonitor (action_verification.py)
+
+/// Post-delivery verification. Distinguishes transport from outcome
+/// (Invariant 20); the fresh snapshot remains ground truth (Invariant 21), so
+/// these are advisory signals layered on top, never the gate.
+public protocol OutcomeMonitor: AnyObject {
+    /// Mark the pre-action state; returns an opaque sequence marker.
+    func mark() -> Int
+    /// Verify an AX-action outcome against a contract.
+    func verifyAX(contract: VerificationContract, mark: Int?, timeout: Double) -> ActionVerificationResult
+    /// Verify CGEvent transport (tap echo match, Invariant 4).
+    func verifyTransport(startSequence: Int, timeout: Double) -> Bool
+}
+
+// MARK: - Focus / interruption services (focus.py)
+
+/// User-interruption monitor (CGEventTap, listen-only — Invariant 5). When the
+/// user touches the driven app, the agent yields (Invariant 16).
+public protocol UserInteractionMonitoring: AnyObject {
+    func startMonitoring(pid: Int)
+    func stopMonitoring()
+    /// Returns a one-shot warning message if the user interacted, else nil.
+    func checkInterruption(bundleId: String) -> String?
+}
+
+/// Menu-open state (used to shorten settle while a menu/popover is open).
+public protocol MenuTracking: AnyObject {
+    var menusOpen: Bool { get }
+    func start(pid: Int)
+    func stop()
+}
+
+/// Frontmost-app tracking (NSWorkspace notifications). Observe-and-log only
+/// (Invariant 15).
+public protocol FrontmostTracking: AnyObject {
+    func start()
+    func stop()
+    func currentFrontmost() -> AppInfo?
+}

@@ -21,5 +21,15 @@ let package = Package(
             name: "MacCUACoreTests",
             dependencies: ["MacCUACore"]
         ),
+        // ORCHESTRATION SPINE — depends only on Core protocol seams, so it
+        // builds + tests on Linux against mock providers (Phase 2).
+        .target(
+            name: "MacCUAServer",
+            dependencies: ["MacCUACore"]
+        ),
+        .testTarget(
+            name: "MacCUAServerTests",
+            dependencies: ["MacCUAServer", "MacCUACore"]
+        ),
     ]
 )
