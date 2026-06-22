@@ -75,6 +75,22 @@ final class FakeAccessibility: AccessibilityProvider {
     private(set) var performed: [(action: String, index: Int)] = []
     private(set) var setAttributes: [(attr: String, value: String, index: Int)] = []
 
+    // --- Additive hooks for handler tests ---
+    /// Per-node frame override (keyed by the Node identity), used when the node has
+    /// no position/size of its own. Falls back to position/size derivation.
+    var frameForNode: ((Node) -> Rect?)?
+    /// Hit-test result for `elementAtPosition`.
+    var hitTestRef: AXElementRef?
+    /// Action names for `getActionNamesForRef`.
+    var actionNamesForRef: [String] = []
+    /// EditableText returned by `makeEditableText` (nil disables the AX text path).
+    var editableText: EditableText? = FakeEditableText()
+    /// Whether `setAttribute` should throw (simulates an unsupported attribute).
+    var setAttributeThrows = false
+    /// Whether `performAction` should throw.
+    var performActionThrows = false
+    private(set) var performedOnRef: [String] = []
+
     func walkTree(axElement: AXElementRef, targetPid: Int?, maxDepth: Int, maxNodes: Int,
                   includeActions: Bool, includeStates: Bool) throws -> [Node] { tree }
     func getKeyWindow(axApp: AXElementRef) -> AXElementRef? { keyWindow }
@@ -82,25 +98,32 @@ final class FakeAccessibility: AccessibilityProvider {
     func getMenuBar(axApp: AXElementRef) -> AXElementRef? { nil }
     func getWindowTitle(axWindow: AXElementRef) -> String? { "Untitled" }
     func getFocusedElement(axApp: AXElementRef, tree: [Node]) -> Int? { focusedIndex }
-    func getElementFrame(node: Node) -> Rect? { node.position.flatMap { p in node.size.map { Rect(x: p.x, y: p.y, w: $0.w, h: $0.h) } } }
-    func elementAtPosition(axApp: AXElementRef, x: Double, y: Double) -> AXElementRef? { nil }
+    func getElementFrame(node: Node) -> Rect? {
+        if let f = frameForNode?(node) { return f }
+        return node.position.flatMap { p in node.size.map { Rect(x: p.x, y: p.y, w: $0.w, h: $0.h) } }
+    }
+    func elementAtPosition(axApp: AXElementRef, x: Double, y: Double) -> AXElementRef? { hitTestRef }
     func getPid(axElement: AXElementRef) -> Int? { nil }
     func refsEqual(_ a: AXElementRef?, _ b: AXElementRef?) -> Bool { a === b }
     func nodeFromRef(_ element: AXElementRef, depth: Int, index: Int) throws -> Node {
         Node(index: index, role: "group", depth: depth, axRef: element)
     }
-    func getActionNamesForRef(_ element: AXElementRef) -> [String] { [] }
+    func getActionNamesForRef(_ element: AXElementRef) -> [String] { actionNamesForRef }
     func getParentRef(_ element: AXElementRef) -> AXElementRef? { nil }
     func getChildren(_ element: AXElementRef) -> [AXElementRef] { [] }
     func hasScrollbarRef(_ element: AXElementRef) -> Bool { false }
     func getAttributeValue(_ element: AXElementRef, _ attr: String) -> String? { nil }
     func isAttributeSettable(node: Node, _ attr: String) -> Bool { true }
-    func performAction(node: Node, action: String) throws { performed.append((action, node.index)) }
-    func performActionOnRef(_ axRef: AXElementRef, action: String) throws { }
+    func performAction(node: Node, action: String) throws {
+        if performActionThrows { throw AutomationError.ax("perform failed") }
+        performed.append((action, node.index))
+    }
+    func performActionOnRef(_ axRef: AXElementRef, action: String) throws { performedOnRef.append(action) }
     func setAttribute(node: Node, _ attr: String, _ value: String) throws {
+        if setAttributeThrows { throw AutomationError.ax("set failed") }
         setAttributes.append((attr, value, node.index))
     }
-    func makeEditableText(element: AXElementRef, pid: Int?) -> EditableText? { FakeEditableText() }
+    func makeEditableText(element: AXElementRef, pid: Int?) -> EditableText? { editableText }
     func extractWebAreaText(_ element: AXElementRef, targetPid: Int?) -> String? { nil }
     func extractTextAreaContent(_ element: AXElementRef, targetPid: Int?) -> String? { nil }
     func getWebURL(_ element: AXElementRef) -> String? { nil }
@@ -194,9 +217,13 @@ final class FakeOutcomeMonitor: OutcomeMonitor {
 
 final class FakeUserInteraction: UserInteractionMonitoring {
     var interruption: String?
-    func startMonitoring(pid: Int) {}
-    func stopMonitoring() {}
-    func checkInterruption(bundleId: String) -> String? { interruption }
+    // Track whether monitoring is active so checkInterruption only yields while
+    // monitoring — mirrors the real monitor, which returns nil when idle. The
+    // spine starts monitoring only for non-state tools. [SPINE TEST HOOK]
+    private(set) var monitoring = false
+    func startMonitoring(pid: Int) { monitoring = true }
+    func stopMonitoring() { monitoring = false }
+    func checkInterruption(bundleId: String) -> String? { monitoring ? interruption : nil }
 }
 
 final class FakeMenuTracking: MenuTracking {

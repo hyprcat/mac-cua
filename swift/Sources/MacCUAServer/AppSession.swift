@@ -78,6 +78,21 @@ public final class AppSession {
     public var userStateInvalidated: Bool = false
     public var userStateInvalidatedMessage: String?
 
+    // Graph registry for this session's tree-graph bookkeeping. In Python this
+    // is a single SessionManager-global registry, but it only carries a counter
+    // + ref-equality seam while the graph *records* are already per-session
+    // (`graphs`); confining it to the session is faithful and keeps the spine an
+    // extension (Swift extensions cannot add stored properties to the manager).
+    // [SPINE ADDITION]
+    public var graphRegistry: GraphRegistry = GraphRegistry()
+
+    // Window availability. The foundation's `AppTarget.axWindow` is non-optional,
+    // but the Python spine modeled "window gone" as `ax_window is None`. We carry
+    // that signal here instead: `refreshWindow` sets it false when the window's
+    // pid is gone or no AX window can be re-bound (then sets axWindow = axApp as a
+    // best-effort read root, never raising — Invariant 7). [SPINE ADDITION]
+    public var windowAvailable: Bool = true
+
     public init(target: AppTarget, graphs: SessionGraphs = SessionGraphs()) {
         self.target = target
         self.graphs = graphs
