@@ -57,8 +57,15 @@ final class FakeAppResolver: AppResolver {
     func getAXApp(bundleId: String, knownPid: Int?) throws -> (axApp: AXElementRef, pid: Int) {
         (axApp, knownPid ?? launchPid)
     }
+    // --- Additive hooks for session-resolution tests ---
+    /// Per-pid AX app override so cross-app fallback tests can hand each running
+    /// app a distinct AX root. nil → the shared `axApp`. [SPINE TEST HOOK]
+    var axAppForPid: [Int: AXElementRef]?
+    /// Pids whose `getAXAppForPid` should throw (simulate a dead/inaccessible app).
+    var throwAXForPids: Set<Int> = []
     func getAXAppForPid(_ pid: Int, bundleId: String?) throws -> (axApp: AXElementRef, pid: Int) {
-        (axApp, pid)
+        if throwAXForPids.contains(pid) { throw AutomationError.ax("no ax app for pid \(pid)") }
+        return (axAppForPid?[pid] ?? axApp, pid)
     }
     func getFrontmostApp() -> AppInfo? { frontmost }
     func restoreFrontmostApp(_ app: AppInfo?) { restoreCalls.append(app) }
@@ -91,10 +98,25 @@ final class FakeAccessibility: AccessibilityProvider {
     var performActionThrows = false
     private(set) var performedOnRef: [String] = []
 
+    /// Explicit AX window list (drives `getWindows`). nil → derive from keyWindow.
+    /// Used by the AX-window signature-matching resolution tests. [SPINE TEST HOOK]
+    var windowList: [AXElementRef]?
+    /// Per-axApp window list (consulted before `windowList`). Lets cross-app
+    /// fallback tests give each app a distinct window set. [SPINE TEST HOOK]
+    var windowsForAXApp: ((AXElementRef) -> [AXElementRef]?)?
+    /// Per-axApp children for `getChildren` (focused-collection expansion tests).
+    var childrenForRef: ((AXElementRef) -> [AXElementRef])?
+    /// Scrollbar predicate for `hasScrollbarRef`.
+    var scrollbarRefs: Set<ObjectIdentifier> = []
+
     func walkTree(axElement: AXElementRef, targetPid: Int?, maxDepth: Int, maxNodes: Int,
                   includeActions: Bool, includeStates: Bool) throws -> [Node] { tree }
     func getKeyWindow(axApp: AXElementRef) -> AXElementRef? { keyWindow }
-    func getWindows(axApp: AXElementRef) -> [AXElementRef] { keyWindow.map { [$0] } ?? [] }
+    func getWindows(axApp: AXElementRef) -> [AXElementRef] {
+        if let perApp = windowsForAXApp?(axApp) { return perApp }
+        if let windowList { return windowList }
+        return keyWindow.map { [$0] } ?? []
+    }
     func getMenuBar(axApp: AXElementRef) -> AXElementRef? { nil }
     func getWindowTitle(axWindow: AXElementRef) -> String? { "Untitled" }
     func getFocusedElement(axApp: AXElementRef, tree: [Node]) -> Int? { focusedIndex }
@@ -105,13 +127,21 @@ final class FakeAccessibility: AccessibilityProvider {
     func elementAtPosition(axApp: AXElementRef, x: Double, y: Double) -> AXElementRef? { hitTestRef }
     func getPid(axElement: AXElementRef) -> Int? { nil }
     func refsEqual(_ a: AXElementRef?, _ b: AXElementRef?) -> Bool { a === b }
+    /// Build a node from a ref (used by live-collection-child expansion). nil →
+    /// default group node. [SPINE TEST HOOK]
+    var nodeForRef: ((_ element: AXElementRef, _ depth: Int, _ index: Int) -> Node)?
     func nodeFromRef(_ element: AXElementRef, depth: Int, index: Int) throws -> Node {
-        Node(index: index, role: "group", depth: depth, axRef: element)
+        if let nodeForRef { return nodeForRef(element, depth, index) }
+        return Node(index: index, role: "group", depth: depth, axRef: element)
     }
     func getActionNamesForRef(_ element: AXElementRef) -> [String] { actionNamesForRef }
     func getParentRef(_ element: AXElementRef) -> AXElementRef? { nil }
-    func getChildren(_ element: AXElementRef) -> [AXElementRef] { [] }
-    func hasScrollbarRef(_ element: AXElementRef) -> Bool { false }
+    func getChildren(_ element: AXElementRef) -> [AXElementRef] {
+        childrenForRef?(element) ?? []
+    }
+    func hasScrollbarRef(_ element: AXElementRef) -> Bool {
+        scrollbarRefs.contains(ObjectIdentifier(element))
+    }
     func getAttributeValue(_ element: AXElementRef, _ attr: String) -> String? { nil }
     func isAttributeSettable(node: Node, _ attr: String) -> Bool { true }
     func performAction(node: Node, action: String) throws {
@@ -175,14 +205,35 @@ final class FakeCapture: CaptureProvider {
     var image: CapturedImage? = FakeImage()
     var screenRecordingGranted = true
 
+    // --- Additive hooks for session-resolution tests ---
+    /// Per-window-id pid override (consulted before the window list). Lets a test
+    /// say "window N is owned by pid P" without a full WindowInfo. [SPINE TEST HOOK]
+    var pidForWindowId: [Int: Int]?
+    /// AX-window → window-id signature match. When set, drives the AX window
+    /// matching path (`_find_ax_window_for_window_id`). Keyed by the opaque ref
+    /// identity. nil → falls back to `windows.first?.windowId`. [SPINE TEST HOOK]
+    var windowIdForAXWindow: ((AXElementRef) -> Int?)?
+    private(set) var captureCalls: [Int] = []
+    /// Make captureWindow throw / return nil to exercise the screenshot-retry arm.
+    var captureReturnsNil = false
+
     func listWindows(ownerPid: Int?) -> [WindowInfo] {
         guard let ownerPid else { return windows }
         return windows.filter { $0.ownerPid == ownerPid }
     }
     func getWindowBounds(windowId: Int) -> Rect? { bounds }
-    func getWindowPid(windowId: Int) -> Int? { windows.first(where: { $0.windowId == windowId })?.ownerPid }
-    func findWindowIdForAXWindow(pid: Int, axWindow: AXElementRef) -> Int? { windows.first?.windowId }
-    func captureWindow(windowId: Int, includeCursor: Bool) throws -> CapturedImage? { image }
+    func getWindowPid(windowId: Int) -> Int? {
+        if let map = pidForWindowId { return map[windowId] }
+        return windows.first(where: { $0.windowId == windowId })?.ownerPid
+    }
+    func findWindowIdForAXWindow(pid: Int, axWindow: AXElementRef) -> Int? {
+        if let hook = windowIdForAXWindow { return hook(axWindow) }
+        return windows.first?.windowId
+    }
+    func captureWindow(windowId: Int, includeCursor: Bool) throws -> CapturedImage? {
+        captureCalls.append(windowId)
+        return captureReturnsNil ? nil : image
+    }
     func checkScreenRecordingPermission() -> Bool { screenRecordingGranted }
     func promptScreenRecordingPermission() -> Bool { screenRecordingGranted }
 }
@@ -199,12 +250,34 @@ final class FakeSelection: SelectionProvider {
 final class FakeSettleMonitor: SettleMonitor {
     var invalidated = false
     private(set) var waits = 0
+    // --- Additive recorders for spine/pipeline tests ---
+    /// Per-call record of (context, timeout, quietPeriod) so tests can assert the
+    /// settle step ran (or was skipped) and with what budget (short-settle cap).
+    private(set) var calls: [(context: String, timeout: Double, quietPeriod: Double)] = []
+    private(set) var cancelled = false
     func waitForSettle(context: String, timeout: Double, quietPeriod: Double) -> SettleResult {
-        waits += 1; return .settled
+        waits += 1
+        calls.append((context, timeout, quietPeriod))
+        return .settled
     }
     var isInvalidated: Bool { invalidated }
     func reset() { invalidated = false }
-    func cancel() {}
+    func cancel() { cancelled = true }
+}
+
+/// A capturing factory for `SettleMonitor`s. Hands each created monitor back to
+/// the test so it can assert on the per-session settle budget (the
+/// `makeFakeProviders` default discards them). [SPINE TEST HOOK]
+final class RecordingSettleFactory {
+    private(set) var created: [FakeSettleMonitor] = []
+    var preset: FakeSettleMonitor?
+    func make(_ session: AppSession) -> SettleMonitor {
+        let monitor = preset ?? FakeSettleMonitor()
+        created.append(monitor)
+        return monitor
+    }
+    /// The most recently created monitor (the one bound to the active session).
+    var last: FakeSettleMonitor? { created.last }
 }
 
 final class FakeOutcomeMonitor: OutcomeMonitor {
@@ -241,14 +314,20 @@ final class FakeFrontmostTracking: FrontmostTracking {
 
 // MARK: - Bundle helper
 
-/// Build a `Providers` from fakes. Tests pass overrides as needed.
+/// Build a `Providers` from fakes. Tests pass overrides as needed. The factory
+/// closures default to fresh per-session fakes; tests that need to observe a
+/// per-session monitor pass an explicit factory (e.g. `RecordingSettleFactory`
+/// or a captured `FakeMenuTracking`). [SPINE TEST HOOK — additive params]
 func makeFakeProviders(
     apps: FakeAppResolver = FakeAppResolver(),
     accessibility: FakeAccessibility = FakeAccessibility(),
     input: FakeInput = FakeInput(),
     capture: FakeCapture = FakeCapture(),
     frontmost: FakeFrontmostTracking = FakeFrontmostTracking(),
-    userInteraction: FakeUserInteraction = FakeUserInteraction()
+    userInteraction: FakeUserInteraction = FakeUserInteraction(),
+    makeSettleMonitor: @escaping (AppSession) -> SettleMonitor = { _ in FakeSettleMonitor() },
+    makeMenuTracker: @escaping (AppSession) -> MenuTracking = { _ in FakeMenuTracking() },
+    makeSelectionClient: @escaping (AppSession) -> SelectionProvider = { _ in FakeSelection() }
 ) -> Providers {
     Providers(
         apps: apps,
@@ -257,11 +336,11 @@ func makeFakeProviders(
         capture: capture,
         frontmostTracker: frontmost,
         userInteractionMonitor: userInteraction,
-        makeSettleMonitor: { _ in FakeSettleMonitor() },
+        makeSettleMonitor: makeSettleMonitor,
         makeAXOutcomeMonitor: { _ in FakeOutcomeMonitor() },
         makeCGEventOutcomeMonitor: { _ in FakeOutcomeMonitor() },
-        makeMenuTracker: { _ in FakeMenuTracking() },
-        makeSelectionClient: { _ in FakeSelection() },
+        makeMenuTracker: makeMenuTracker,
+        makeSelectionClient: makeSelectionClient,
         makeEditableText: { _, _ in FakeEditableText() }
     )
 }
