@@ -148,12 +148,8 @@ public final class Node {
     }
 }
 
-/// Placeholder for the stale-node-recovery locator produced by the TreeGraph
-/// module. Defined here so `Node` can reference it before TreeGraph lands;
-/// the TreeGraph port fills in the real structure.
-public struct GraphLocator: Sendable {
-    public init() {}
-}
+// `GraphLocator` is defined in TreeGraph.swift (the real stale-node-recovery
+// locator). The placeholder that previously lived here has been removed.
 
 /// Geometry and state metadata for the target application.
 public struct AppState: Equatable, Sendable {
