@@ -1,0 +1,25 @@
+# Ralph Progress Log — mac-cua Swift Port
+Started: (stamped on first ./ralph.sh run)
+---
+
+## Codebase Patterns
+- Build/test from the `swift/` dir: `cd swift && swift build && swift test`. Toolchain: Swift 6.x.
+- `MacCUACore` + `MacCUAServer` are **Linux-pure**: NO macOS framework imports (no AppKit/CoreGraphics/ApplicationServices/ScreenCaptureKit/Vision/IOKit). All macOS code goes in `MacCUAKit`/`CSkyLightShim`/the executable behind `#if os(macOS)`.
+- Port behavior from the Python reference in `app/` + `app/_lib/`; match the existing test intent.
+- Provider protocol seams are already defined in `swift/Sources/MacCUACore/Providers.swift` — Phases 3–6 implement them in `MacCUAKit`.
+- **Prime Invariant:** never foreground / activate / warp-cursor / global-post. Banned symbols are guarded by story US-012; never weaken those guards.
+- Target the **experimental confirmed-delivery pipeline** (transport-confirm via delivery tap + snapshot-as-truth + `compute_verdict`). Do NOT re-enable inline post-delivery AX verification on primary paths (Invariant 21).
+- Exact SPI symbols + CGEvent field numbers: `docs/CODEX_PARITY_CHANGES.md` Appendix. The 23 invariants: `docs/SWIFT_PORT_DESIGN.md` §3.
+- **Speed:** decompose each story and run Sonnet/Opus sub-agents in parallel (read Python / draft Swift / write tests / audit invariants).
+
+## Manual-Verify Backlog
+(Mac-integration behaviors that compiled + fake-tested but still need a human real-app pass. Append `[US-0xx] <what to check>` as you complete Phase 3–6 stories.)
+---
+
+## US-001 — Port markdown_writer.py to Core/MarkdownWriter
+- Implemented `swift/Sources/MacCUACore/MarkdownWriter.swift`: `AttributedRun` injected abstraction (text/link/bold/italic/monospace/headingLevel/listStyle), `MarkdownWriter.write(runs:)`/`applyAttributes` porting the exact Python apply-order (link → bold/italic → heading → monospace → list), pure `applyListStyle`, plus `extractFontTraits`/`isMonospaceFont` name-based helpers and `formatSelection` (port of selection.py). NSAttributedString → [AttributedRun] left as `AttributedRunProvider` Kit seam (impl deferred).
+- Tests: `swift/Tests/MacCUACoreTests/MarkdownWriterTests.swift` (20 golden cases incl. nesting order, link==text skip, heading range clamp, mono block vs inline, list styles, font helpers, format_selection).
+- Sub-agents used: none — small contained pure-logic story implemented directly in main thread.
+- Quality gate: `swift build` clean; `swift test` 362 passed / 0 fail (was 342).
+- Learnings: Core is pure (no macOS imports); model platform NSAttributedString adapters as `protocol` seams in Core, implement in Kit. Apply-order is load-bearing for markdown nesting — keep link-first. Free top-level funcs + `enum` namespaces match the existing Core style (cf. Errors.swift `axError`).
+---

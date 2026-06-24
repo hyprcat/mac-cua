@@ -1,0 +1,780 @@
+{
+  "project": "mac-cua Swift port",
+  "branchName": "ralph/swift-port-completion",
+  "description": "Complete the mac-cua -> Swift port (Phases 3-6 + finish the Linux layer). Native macOS background computer-use agent. Preserve the Prime Invariant (never foreground/steal focus/move cursor) and all 23 invariants; target the experimental confirmed-delivery pipeline; fold Codex/SkyComputerUse parity in by phase; ship the native ghost cursor. Full spec: tasks/prd-swift-port-completion.md + docs/SWIFT_PORT_DESIGN.md + docs/CODEX_PARITY_CHANGES.md.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Port markdown_writer.py to Core/MarkdownWriter",
+      "description": "As the serializer, I want rich-text AX content rendered to Markdown via pure logic so format_selection and rich-text snapshots match Python.",
+      "acceptanceCriteria": [
+        "New MacCUACore/MarkdownWriter.swift ports AttributedStringMarkdownWriter assembly as pure functions over an injected AttributedRun abstraction (font/trait/link/list runs -> Markdown)",
+        "format_selection(text:) logic ported and wired where Serialize/selection formatting needs it",
+        "Golden tests: representative run-sequences -> expected Markdown, captured from Python output",
+        "NSAttributedString -> [AttributedRun] adapter declared as a Kit seam (impl deferred), not implemented here",
+        "swift build && swift test pass on Linux (existing 342 tests stay green, new tests included)"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Port observer.py pure logic: animation-aware debounce/settle state machine",
+      "description": "As the settle subsystem, I want an animation-aware DebounceStateMachine as pure Linux-testable logic so settle is by-observation, never a fixed sleep.",
+      "acceptanceCriteria": [
+        "New MacCUACore DebounceStateMachine (pure): consumes (timestamp, tree-fingerprint, key-frame rects) ticks; requires N ms quiet; treats changing frame rects as in-flight animation and keeps waiting; hard cap + early-exit; time is injected (no clock calls inside)",
+        "AssertionTracker ref-count balance logic ported as pure state (PID-scoped, try/finally semantics)",
+        "SettleMonitor seam updated to be driven by this machine (real frame feed is a Kit impl, Phase 3)",
+        "Tests: quiet-converges, animation-keeps-waiting, hard-cap-fires, assertion-count-always-balances",
+        "swift build && swift test pass on Linux (existing tests stay green)"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Post-action AX change-summary verdict (E3) in Core",
+      "description": "As compute_verdict, I want a structured pre/post tree diff so confirmed-transport + zero-change = DELIVERED_NO_EFFECT is first-class.",
+      "acceptanceCriteria": [
+        "Pure changeSummary(pre:[Node], post:[Node]) -> {added, removed, changed} keyed by stable element key",
+        "compute_verdict consumes it: transport-confirmed + 0/0/0 => DELIVERED_NO_EFFECT; >0 => confirmed effect",
+        "Existing VerdictTests stay green (raw values still match Python)",
+        "Tests cover added-only / removed-only / changed-only / none",
+        "swift build && swift test pass on Linux"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Request/turn-scoped cache (L1) in Core",
+      "description": "As the spine, I want a turn-scoped cache (PID->AppState, name->PID) so batch and repeated lookups do not re-walk.",
+      "acceptanceCriteria": [
+        "Pure cache type with request/turn lifetime; PID->AppState reused within a turn/batch, name->PID reused across calls; explicit invalidation hooks",
+        "Distinct from the SCContentFilter cache (that is Phase 3)",
+        "Tests: hit/miss/invalidate; a batch reuses the pre-action tree instead of re-walking",
+        "swift build && swift test pass on Linux"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "select_text range-resolution (D1 pure tier) in Core",
+      "description": "As select_text, I want content->range resolution (find substring by exact text + prefix/suffix disambiguation -> {location,length}) as pure logic ahead of the Mac impl.",
+      "acceptanceCriteria": [
+        "Pure resolver: given whole text + target substring (+ optional prefix/suffix), returns unambiguous (location,length) or a typed ambiguity/not-found error",
+        "Caret-before / caret-after modeled as zero-length ranges",
+        "Tests: unique match, duplicate-needs-disambiguation, not-found, caret placement",
+        "swift build && swift test pass on Linux"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "CGEvent field-constant table in Core",
+      "description": "As the input layer, I want every CGEvent field number / flag mask / source-state id as named Core constants so the Mac impl cannot transpose a magic number.",
+      "acceptanceCriteria": [
+        "Core constants: scroll axes line 11/12/13, fixedPt 93/94/95, pointDelta 96/97/98, isContinuous 88, scrollPhase 99; mouse subtype 7, windowUnderPointer 91, ThatCanHandle 92; eventSourceStateID 45; SkyLight field 40 = pid; source-state Private=-1; flag masks Shift/Control/Alt/Cmd; mouse buttons",
+        "Tests assert numeric values match the docs Appendix exactly",
+        "swift build && swift test pass on Linux"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Confirm InputStrategy pointer-first for Chromium/Electron (C1)",
+      "description": "As InputStrategy, I want web/Electron app types to choose pointer-first click delivery (AX-first only for native Cocoa + menu items) since AXPress under-triggers web controls.",
+      "acceptanceCriteria": [
+        "Verify/extend InputStrategy.swift: Chromium/Electron/web -> pointer-first; native Cocoa controls + menu items -> AX-first",
+        "Tests over the app-type x element-type matrix assert the chosen order",
+        "swift build && swift test pass on Linux"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "batch tool (D3): N actions / one MCP call",
+      "description": "As the model, I want to send N actions in one call (linear, stop-on-first-failure, one final snapshot) so I save N-1 round-trips.",
+      "acceptanceCriteria": [
+        "batch tool def added (ordered list of action items); spine executes sequentially, stops on first failure, returns one final snapshot + per-step outcomes",
+        "Reuses the turn cache (US-004) for the pre-action tree",
+        "Handler tested end-to-end against mock providers: success path, mid-batch failure halts remainder, final snapshot present",
+        "swift build && swift test pass on Linux"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "wait tool (D4)",
+      "description": "As the model, I want an explicit settle/wait tool (Codex parity).",
+      "acceptanceCriteria": [
+        "wait tool def + handler; drives the DebounceStateMachine (US-002) via the SettleMonitor seam with the tool timeout; returns a fresh snapshot",
+        "Tested against mock providers (settles, hits cap)",
+        "swift build && swift test pass on Linux"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Wire select_text + clipboard tool defs + spine routing",
+      "description": "As the spine, I want the two new tool surfaces to exist and route, even though their Mac providers arrive later.",
+      "acceptanceCriteria": [
+        "select_text tool def (content/prefix/suffix/caret params) -> spine calls US-005 resolver, then the SelectionProvider seam (mock for now)",
+        "clipboard tool def (get/set/clear) -> ClipboardProvider seam (mock for now)",
+        "Handlers tested against fakes; real impls are US-040 / US-041",
+        "swift build && swift test pass on Linux"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Action-feedback packet shape (F) in ToolResponse",
+      "description": "As the model, after every action I want delivery path, target window id+title, logical cursor before/after, and the change-summary so I self-correct instead of flying blind.",
+      "acceptanceCriteria": [
+        "ToolResponse carries an action-feedback struct: deliveryPath (AXPress|SkyLight|CGEvent|PSN|wheel), windowId+title, cursorBefore/cursorAfter (logical), change-summary (US-003)",
+        "FormatMCP renders it; assembly tested against fakes",
+        "swift build && swift test pass on Linux (real population is Phase 4)"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Invariant & anti-regression test guard (sec3, secJ, M4)",
+      "description": "As the project, I want automated proof that banned behavior is unreachable and that we do not adopt macos-cua weaker choices.",
+      "acceptanceCriteria": [
+        "Guard asserts no CGEventPost (global), CGWarpMouseCursorPosition, NSRunningApplication.activate, AXRaise, SetFrontmost, SLPSSetFrontProcessWithOptions is reachable from input/capture sources",
+        "Guard against M4 regressions: scroll sets >1 delta axis (not integer-only); refetch uses GraphLocator (not same-preorder-index); element key is the graph locator (not role|label|frame)",
+        "Guard: no ax_ref/graph_id/graph_generation/graph_locator field nor <AXUIElement 0x...> string is serializable into the model packet",
+        "swift build && swift test pass on Linux"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Port/audit residual support modules (analytics/tracing/lifecycle/elicitation)",
+      "description": "As the spine, I want any load-bearing logic in the Python support modules ported or consciously dropped with a recorded reason, so nothing silently goes missing.",
+      "acceptanceCriteria": [
+        "Audit app/_lib/{analytics,tracing,lifecycle}.py + app/_lib/elicitation.py; for each, port the pure logic the spine depends on OR record in tasks/prd-swift-port-completion.md sec9 why it is out of scope",
+        "Elicitation (MCP elicitation prompts) decision recorded: ported to the Swift MCP layer or deferred",
+        "swift build && swift test pass on Linux"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Add MacCUAKit + CSkyLightShim targets to Package.swift",
+      "description": "As the build, I want the macOS adapter and C-shim targets to exist and compile without breaking the Linux build of Core/Server.",
+      "acceptanceCriteria": [
+        "Package.swift: new CSkyLightShim (C target: header + module.modulemap) and MacCUAKit (depends on Core + CSkyLightShim), conditionally included so the Linux build of Core/Server is unaffected",
+        "Empty-but-compiling stubs conform to the Core provider protocols (throwing / fatalError(unimplemented) bodies are fine at this step)",
+        "MANUAL-VERIFY: swift build succeeds on macOS with Kit targets enabled",
+        "Linux gate: Core/Server swift build && swift test green (Kit excluded)"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "mac-cua executable target: MCP stdio entrypoint + permissions preflight",
+      "description": "As a user, I want a runnable binary that speaks MCP over stdio and wires real providers into SessionManager.",
+      "acceptanceCriteria": [
+        "Executable target using the official modelcontextprotocol/swift-sdk stdio transport; serves the same tool defs",
+        "Permissions UX: first call prompts Accessibility (AXIsProcessTrustedWithOptions[.prompt:true]) + Screen Recording (CGRequestScreenCaptureAccess()); later calls just check; returns permissions-pending retry message until granted; explicit AX preflight",
+        "NSApplication activation policy set to .accessory (stay out of Dock); never activates",
+        "MANUAL-VERIFY: binary launches, registers with an MCP client, drives the permission prompts once",
+        "Linux gate green (Core/Server swift build && swift test)"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "AppResolver real impl (non-activating)",
+      "description": "As the resolver, I want NSWorkspace-backed app resolution that never foregrounds the target.",
+      "acceptanceCriteria": [
+        "list/resolve/frontmost via NSWorkspace; launch with activates=false (+ open -g fallback); save/restore the USER previous frontmost only; never proactively activate",
+        "Pure plist/lsappinfo parsing extracted + fake-tested",
+        "MANUAL-VERIFY: launching a target app does not foreground it; the user previous frontmost app is restored",
+        "Linux gate green"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "AccessibilityProvider walker: preorder reverse-push DFS",
+      "description": "As the read path, I want a non-activating AX walker that builds the flat node tree exactly like Python.",
+      "acceptanceCriteria": [
+        "AXUIElementCreateApplication(pid) + copy/read only; NO AXMain/AXFocused/AXRaise during reads (Inv 7); preorder reverse-push DFS with monotonic depth (Inv 12); recursion cap 30",
+        "OOP detection by AXUIElementGetPid vs target (Inv 9); AX errors -25205/-25212 surfaced as stale signals (Inv 10), not hard failures",
+        "AXValue unboxing via AXValueGetValue (no regex fallbacks); CFEqual for ref compare",
+        "MANUAL-VERIFY: walking a real Cocoa app yields a tree whose pruned indices match the Python tool on the same screen",
+        "Linux gate green"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Rich AX attribute population (A3)",
+      "description": "As the model, I want disabled/focused/selected/value state on nodes so I do not click dead controls.",
+      "acceptanceCriteria": [
+        "Walker fills AXEnabled, AXFocused, AXSelected, AXValue (+ AXMinValue/AXMaxValue), AXPlaceholderValue, AXRoleDescription, AXSelectedText, position-in-set into Node",
+        "Batch AX-error entries detected via AXValueGetType == .axError (not string-sniffing)",
+        "MANUAL-VERIFY: disabled/focused/selected states appear correctly for a real toolbar + form",
+        "Linux gate green"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "Enable Chromium/Electron trees: AXEnhancedUserInterface + AXManualAccessibility + re-walk (A1)",
+      "description": "As the read path, I want Electron/Chromium apps to expose their AX tree so the agent is not blind on modern apps.",
+      "acceptanceCriteria": [
+        "On session attach, set BOTH kAXEnhancedUserInterfaceAttribute and AXManualAccessibility = kCFBooleanTrue on the AXApplication element, then re-walk (poll a few times / few hundred ms until non-empty or settle); first walk after setting is expected empty",
+        "Per-app, remembered, reversible, logged (enhanced-UI can change app layout/perf); AccessibilityProvider.enableEnhancedUI(appRef) seam",
+        "MANUAL-VERIFY: Slack / VS Code / Discord / Obsidian expose a non-empty tree after attach",
+        "Linux gate green"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "Bind AX element -> CGWindowID via private _AXUIElementGetWindow (A4)",
+      "description": "As the capture/SkyLight target binding, I want the exact window id for an AX window directly.",
+      "acceptanceCriteria": [
+        "_AXUIElementGetWindow(AXUIElementRef, CGWindowID*) resolved per-symbol-optional; used for findWindowIdForAXWindow + capture/SkyLight binding; bounds/title match only as fallback",
+        "MANUAL-VERIFY: the bound window id matches the actual on-screen window for multi-window apps",
+        "Linux gate green"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "Text geometry via parameterized attributes (A5)",
+      "description": "As text targeting, I want on-screen bounds for a character range.",
+      "acceptanceCriteria": [
+        "AXUIElementCopyParameterizedAttributeValue for kAXBoundsForRange, kAXRangeForPosition, kAXVisibleCharacterRange",
+        "MANUAL-VERIFY: where-is-this-text returns correct on-screen bounds in TextEdit + Safari",
+        "Linux gate green"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "CaptureProvider: occluded single-window capture (B1, B5; Inv 13)",
+      "description": "As capture, I want one window backing store even when occluded, with no activation and no user cursor.",
+      "acceptanceCriteria": [
+        "SCContentFilter(desktopIndependentWindow:) + SCScreenshotManager.captureImage; captures occluded/background windows with no activation; showsCursor = false",
+        "CGWindowListCreateImage NOT used (NULL on macOS 26); private CGSHWCaptureWindowList only as fallback (US-024)",
+        "MANUAL-VERIFY: a fully-occluded background window is captured correctly, no activation, user cursor absent from the image",
+        "Linux gate green (pure sizing/crop math fake-tested)"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "Capture metadata + capture-time downscale + latency benchmark (B4, B6, L3)",
+      "description": "As the model, I want to know the exact frame I am reasoning over; as the system, I want the fastest one-shot capture path.",
+      "acceptanceCriteria": [
+        "Emit produced px dims, scale/backing factor, crop origin, window id+title, display id",
+        "GPU downscale via SCStreamConfiguration.width/height + scalesToFit; ImageIO kCGImageDestinationImageMaxPixelSize encode; NO screencapture/sips shell-out",
+        "MANUAL-VERIFY (L3 benchmark): measure CGDisplay-window-scoped vs SCK one-shot latency on the target Mac; record numbers; pick the faster path",
+        "Linux gate green (sizing/downscale math fake-tested)"
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-024",
+      "title": "Capture caching + private GPU fallback (B2, B3)",
+      "description": "As capture, I want filter resolution cached and a GPU fallback when SCK is unavailable.",
+      "acceptanceCriteria": [
+        "Cache SCShareableContent/SCContentFilter per window/display; invalidate on display-config / window-replace",
+        "Per-symbol-optional CGSHWCaptureWindowList / SLSHWCaptureStreamCreateWithWindow fallback behind CaptureProvider",
+        "MANUAL-VERIFY: cache-hit path is faster; fallback engages when SCK unavailable",
+        "Linux gate green"
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-025",
+      "title": "Observers / run-loop: CFRunLoop thread; AX notifications optional-only (sec5.3, sec5.2)",
+      "description": "As the runtime, I want a run-loop thread for the taps we keep, with settle/stale built on polling, NOT AXObserver.",
+      "acceptanceCriteria": [
+        "Dedicated Thread running CFRunLoopRun() for the CGEventTaps we keep; C callbacks pass self via Unmanaged.passUnretained(self).toOpaque() refcon (no global registry/lock)",
+        "AXObserver is NOT a correctness gate: settle is the polling DebounceStateMachine (US-002); stale detection is liveness-check + GraphLocator re-walk (US-038), not the invalidation flag",
+        "MANUAL-VERIFY: settle returns only after real UI quiesces (no early NO_CHANGE) on an animated transition",
+        "Linux gate green"
+      ],
+      "priority": 25,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-026",
+      "title": "Permissions provider real impl",
+      "description": "As the server, I want real AX + Screen Recording permission checks/prompts.",
+      "acceptanceCriteria": [
+        "AX: AXIsProcessTrusted / AXIsProcessTrustedWithOptions; Screen Recording: CGPreflightScreenCaptureAccess / CGRequestScreenCaptureAccess",
+        "MANUAL-VERIFY: cold-start prompts once each; warm-start silently checks; pending -> retry message",
+        "Linux gate green"
+      ],
+      "priority": 26,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-027",
+      "title": "Phase-3 acceptance: real list_apps + get_app_state end-to-end",
+      "description": "As a user, I want the two read tools to work on real apps with the same packet shape as Python and zero foregrounding.",
+      "acceptanceCriteria": [
+        "Both tools run against real apps through the executable, producing the same pruned/serialized packet shape as Python (indices dense 0..N-1, announced truncations, image attached)",
+        "MANUAL-VERIFY: run get_app_state on Safari, Slack, System Settings; tree + screenshot look correct; NO app is foregrounded during either call",
+        "Linux gate green"
+      ],
+      "priority": 27,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-028",
+      "title": "InputProvider CGEvent base: postToPid only (Inv 1, 2, 4)",
+      "description": "As input, I want the always-available native delivery path that never warps the cursor or posts globally.",
+      "acceptanceCriteria": [
+        "Only CGEvent.postToPid(_:); never post(tap:). No cursor warp, no mouse-move posted to a pid",
+        "Click target = event mouseCursorPosition + mouseEventWindowUnderMousePointer(ThatCanHandle) = target window id (no warp)",
+        "Per-session private CGEventSource(stateID:.privateState = -1)",
+        "MANUAL-VERIFY: a click on a background window lands; the user real cursor never moves; user keyboard unaffected",
+        "Linux gate green"
+      ],
+      "priority": 28,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-029",
+      "title": "CSkyLightShim: symbol surface + optional resolution",
+      "description": "As the SkyLight provider, I want every private symbol declared and dlsym-resolved optionally so a missing one falls through, never crashes or foregrounds.",
+      "acceptanceCriteria": [
+        "Header/modulemap extern-declares stable + delivery symbols with exact prototypes: CGSMainConnectionID, SLSGetWindowOwner, SLSGetConnectionPSN, CGSConnectionGetPID, SLEventPostToPid, SLEventSetIntegerValueField, SLEventSetAuthenticationMessage, CGEventSetWindowLocation, CGEventPostToPSN",
+        "Each symbol resolved via dlopen+dlsym -> unsafeBitCast C fn ptr; nil = absent => fall through, never crash, never foreground; SLSEventAuthenticationMessage via ObjC runtime",
+        "SkyLightProvider.isAvailable is dynamic (re-evaluated, test-patchable)",
+        "MANUAL-VERIFY: on the target macOS, log which symbols resolved",
+        "Linux gate green (resolution/branch logic fake-tested with a mocked loader)"
+      ],
+      "priority": 29,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-029b",
+      "title": "validate_window_owner: dual strategy, assume-valid on failure (Inv 19, sec5.7)",
+      "description": "As owner validation, I want both pre-26 and 26+ strategies and a safe assume-valid when neither can run.",
+      "acceptanceCriteria": [
+        "Keep both strategies: PID->cid (pre-26) and cid->PID (26+, CGSConnectionGetPID); when it cannot validate, return assume-valid; never block an action on an unperformable validation",
+        "MANUAL-VERIFY: owner validation succeeds on 26; absent-symbol path assumes valid",
+        "Linux gate green (branch logic fake-tested)"
+      ],
+      "priority": 30,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-030",
+      "title": "SkyLight targeted mouse delivery + window stamping (C2)",
+      "description": "As input, I want background mouse events well-associated to the target window via SkyLight.",
+      "acceptanceCriteria": [
+        "Mouse event built NSEvent-backed (+[NSEvent mouseEventWithType:...windowNumber:...].CGEvent) for proper window association; stamp subtype(7)=3, windowUnderPointer(91)/ThatCanHandle(92)=windowId, window-local coords via CGEventSetWindowLocation, pid via SLEventSetIntegerValueField(e,40,pid); post via SLEventPostToPid",
+        "MANUAL-VERIFY: background click on Chromium/Electron triggers the control (hover/mousedown path), no foregrounding",
+        "Linux gate green"
+      ],
+      "priority": 31,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-031",
+      "title": "SkyLight targeted keyboard: authenticated + PSN (C3, Inv 3)",
+      "description": "As input, I want authenticated background keyboard delivery that never corrupts the user modifier state.",
+      "acceptanceCriteria": [
+        "SLSEventAuthenticationMessage(+messageWithEventRecord:pid:version:) -> SLEventSetAuthenticationMessage -> SLEventPostToPid; plus CGEventPostToPSN to the owner (SLSGetWindowOwner->SLSGetConnectionPSN)",
+        "Modifiers are flags on the key event (CGEventSetFlags); discrete flagsChanged only ever on the SkyLight path, never via postToPid (Inv 3)",
+        "MANUAL-VERIFY: typing into a background window does not corrupt the user live modifier state",
+        "Linux gate green"
+      ],
+      "priority": 32,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-032",
+      "title": "click: pointer-first Chromium / AX-first native; real CGEvent fidelity (C1)",
+      "description": "As click, I want the right delivery order per app type with transport confirmed and outcome from snapshot.",
+      "acceptanceCriteria": [
+        "Delivery order from InputStrategy (US-007): pointer-first web/Electron, AX-first native/menus; real CGEvent click (down/up) where fidelity matters",
+        "Confirm transport via the listen-only delivery tap echo (field 45 match); outcome trusted from snapshot (Inv 21 - do NOT re-enable inline post-delivery AX verification on the primary path)",
+        "MANUAL-VERIFY: click works on a web button, a native button, and a menu item, all in background",
+        "Linux gate green"
+      ],
+      "priority": 33,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-033",
+      "title": "type_text: Unicode per-grapheme (C7)",
+      "description": "As type_text, I want IME/emoji-safe text routed to the target.",
+      "acceptanceCriteria": [
+        "CGEventKeyboardSetUnicodeString per grapheme, routed to target",
+        "MANUAL-VERIFY: typing emoji + accented text into a background field is correct",
+        "Linux gate green"
+      ],
+      "priority": 34,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-034",
+      "title": "press_key: hold/interval timing preserved (D5)",
+      "description": "As press_key, I want per-key timing preserved for games/hold-shortcuts.",
+      "acceptanceCriteria": [
+        "Per-key down/up + inter-key interval timing preserved; modifiers as flags",
+        "MANUAL-VERIFY: a chord (e.g. Cmd-Shift-T) and a held key both register in background",
+        "Linux gate green"
+      ],
+      "priority": 35,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-035",
+      "title": "scroll: all delta axes + AX page-scroll first (C4, Inv 6)",
+      "description": "As scroll, I want every delta axis set so both Chromium and native Cocoa scroll, with semantic page-scroll first.",
+      "acceptanceCriteria": [
+        "Set line (11/12), fixedPtDelta (93/94, double), pointDelta (96/97, int), isContinuous(88); semantic AX AXScrollUpByPage/DownByPage first, wheel as fallback",
+        "MANUAL-VERIFY: scroll works in both a Chromium webview (point delta) and a native Cocoa list (fixedPt)",
+        "Linux gate green"
+      ],
+      "priority": 36,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-036",
+      "title": "drag (pure CGEvent) + set_value + perform_secondary_action (pure AX)",
+      "description": "As input, I want drag via postToPid and the pure-AX value/secondary actions.",
+      "acceptanceCriteria": [
+        "drag via postToPid down/move/up (no warp); set_value/perform_secondary_action via AX setters/actions (AXValue-typed ranges)",
+        "MANUAL-VERIFY: a slider drag and a right-click menu both work in background",
+        "Linux gate green"
+      ],
+      "priority": 37,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-037",
+      "title": "Transport confirmation + OutcomeMonitor wiring (experimental pipeline; Inv 20, 21)",
+      "description": "As verification, I want listen-only transport confirmation feeding compute_verdict, with snapshot as ground truth.",
+      "acceptanceCriteria": [
+        "Port delivery_tap.py (listen-only confirmation tap, never suppresses/modifies user events - Inv 5) + action_verification.py transport check; feed compute_verdict (transport != outcome)",
+        "Snapshot remains ground truth; inline post-delivery AX verification stays disabled on primary paths",
+        "MANUAL-VERIFY: a delivered-but-no-effect action reports DELIVERED_NO_EFFECT, not a transport failure",
+        "Linux gate green (verdict logic already covered)"
+      ],
+      "priority": 38,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-038",
+      "title": "Stale recovery on real AX: RefetchableTree + GraphLocator (E2; Inv 10)",
+      "description": "As accuracy, I want acting on a changed tree to rebind to the correct element via the locator, never a dead ref.",
+      "acceptanceCriteria": [
+        "On -25202/-25204/-25205/-25212, re-walk + rebind via GraphLocator (not same preorder index); liveness-check one attribute before acting on a cached ref",
+        "MANUAL-VERIFY: acting after the tree mutated rebinds to the correct element, never a dead/stale one",
+        "Linux gate green (locator scoring already covered)"
+      ],
+      "priority": 39,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-039",
+      "title": "Action-feedback packet population (F) + BackgroundCursor drive",
+      "description": "As the model, I want the feedback packet populated with real values; as Phase 6 prep, I want the logical cursor chokepoint wired.",
+      "acceptanceCriteria": [
+        "Populate US-011 packet with real delivery path / window / logical cursor before/after / change-summary",
+        "One BackgroundCursor per AppSession (logical position only - OS cursor never moves); its moveTo is the single chokepoint that later drives the ghost overlay (GhostCursorController.move(windowId:)), seam present, render deferred to Phase 6",
+        "MANUAL-VERIFY: feedback packet values are correct after a real click",
+        "Linux gate green"
+      ],
+      "priority": 40,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-040",
+      "title": "select_text Mac impl: Tier1 CFRange + Tier2 AXTextMarker (D1)",
+      "description": "As select_text, I want real selection for both simple fields and web/rich content.",
+      "acceptanceCriteria": [
+        "Tier 1 simple fields: AXSelectedTextRange via AXValueCreate(.cfRange,...). Tier 2 web/rich: AXTextMarker/AXTextMarkerRange (AXStringForTextMarkerRange -> find substring via US-005 -> set AXSelectedTextMarkerRange); caret = zero-length marker range",
+        "MANUAL-VERIFY: select a phrase in an NSTextView (Tier 1) and in Safari/Mail (Tier 2)",
+        "Linux gate green (range resolution already covered)"
+      ],
+      "priority": 41,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-041",
+      "title": "clipboard Mac impl (D2)",
+      "description": "As clipboard, I want background-safe pasteboard read/write/clear.",
+      "acceptanceCriteria": [
+        "NSPasteboard get/set/clear; background-safe, no focus",
+        "MANUAL-VERIFY: read + write clipboard while a user app is frontmost, without disturbing it",
+        "Linux gate green"
+      ],
+      "priority": 42,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-042",
+      "title": "macOS-26 SPI-removal resilience pass (C8, sec5.7)",
+      "description": "As resilience, I want removed SkyLight/CGS symbols to never become hard dependencies or foregrounding triggers.",
+      "acceptanceCriteria": [
+        "CGEventPostToPid is the always-available primary for native apps; SkyLight family is an optimization for non-Cocoa; every removed symbol (CGSPost*EventToProcess, CGSGetConnectionIDForPID) is optional and never a hard dependency or foregrounding trigger",
+        "MANUAL-VERIFY: with SkyLight symbols forced absent, native-app input still works via CGEventPostToPid; nothing foregrounds",
+        "Linux gate green"
+      ],
+      "priority": 43,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-043",
+      "title": "Retries + circuit breaker (SCK failure counter actor)",
+      "description": "As resilience, I want capture failures to degrade gracefully without crash or foregrounding.",
+      "acceptanceCriteria": [
+        "Per-failure counter actors; SCK circuit breaker; retry policies per design",
+        "MANUAL-VERIFY: repeated capture failures trip the breaker and degrade gracefully (no crash, no foreground)",
+        "Linux gate green"
+      ],
+      "priority": 44,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-044",
+      "title": "User-interruption monitor: yield on user interaction (Inv 16)",
+      "description": "As out-of-the-way behavior, I want the agent to yield the moment the user touches the driven app.",
+      "acceptanceCriteria": [
+        "UserInteractionMonitor via listen-only CGEventTap; on user interaction with the driven app, surface a one-shot warning telling the model to stop and re-query",
+        "MANUAL-VERIFY: touching the driven app makes the next tool call return the yield warning",
+        "Linux gate green"
+      ],
+      "priority": 45,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-045",
+      "title": "Window-ordering + frontmost observers",
+      "description": "As state tracking, I want z-order and frontmost changes detected without AXObserver.",
+      "acceptanceCriteria": [
+        "WindowOrderingObserver polls CGWindowList; NSWorkspace frontmost notifications kept",
+        "MANUAL-VERIFY: z-order changes are detected without AXObserver",
+        "Linux gate green"
+      ],
+      "priority": 46,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-046",
+      "title": "Vision OCR fallback (A2)",
+      "description": "As perception, I want OCR text only for genuinely tree-less surfaces, off the hot path.",
+      "acceptanceCriteria": [
+        "OCRProvider via VNRecognizeTextRequest(.accurate) over the window image; emit synthetic source:ocr nodes (text + bounds, no AX ref) merged into the same packet; gated strictly on ax_available == false / near-empty tree",
+        "MANUAL-VERIFY: a canvas/PDF-image surface yields OCR nodes; a normal AX app does NOT trigger OCR",
+        "Linux gate green (merge logic fake-tested)"
+      ],
+      "priority": 47,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-047",
+      "title": "Safety blocklist + lock-screen guard (G)",
+      "description": "As safety, I want input refused against sensitive targets and at the lock screen.",
+      "acceptanceCriteria": [
+        "Blocklist: Terminal apps, our own process, admin-auth dialogs, SecurityAgent / security-privacy prompts, Keychain prompts. Lock guard: CGSessionCopyCurrentDictionary -> CGSSessionScreenIsLocked == 1 => refuse input",
+        "MANUAL-VERIFY: input is refused against a Terminal window and at the lock screen",
+        "Linux gate green (blocklist logic fake-tested)"
+      ],
+      "priority": 48,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-048",
+      "title": "Redacted JSONL audit sink (G)",
+      "description": "As trust/debug, I want a redacted action audit log with no leaked secrets or tree refs.",
+      "acceptanceCriteria": [
+        "Redacted JSONL audit of actions; no secrets/tree refs leaked",
+        "Tests: sink writes expected redacted shape",
+        "swift build && swift test pass on Linux"
+      ],
+      "priority": 49,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-049",
+      "title": "Per-app instruction playbooks (I)",
+      "description": "As guidance, I want curated per-app playbooks injected into the snapshot.",
+      "acceptanceCriteria": [
+        "Author playbooks (markdown via existing guidanceCache) for Safari, Chrome, Slack, Mail, Xcode, VS Code, System Settings (Python ships only com.apple.Music.md)",
+        "Guidance injection verified in format_mcp output",
+        "swift build && swift test pass on Linux (content + injection are pure)"
+      ],
+      "priority": 50,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-050",
+      "title": "macOS-26 matrix validation + close gaps vs Python",
+      "description": "As a release gate, I want the invariant checklist and Python feature set walked on the target macOS with any residual gap filed.",
+      "acceptanceCriteria": [
+        "Walk the design sec3 invariant checklist and the Python feature set; file any residual gap as a follow-up story",
+        "MANUAL-VERIFY: full read+write smoke across Safari/Slack/native app on the target macOS, background-only",
+        "Linux gate green"
+      ],
+      "priority": 51,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-051",
+      "title": "GhostCursorOverlay AppKit impl: non-activating panel per window (sec7.2)",
+      "description": "As the payoff UX, I want a decorative translucent cursor on the driven window that never foregrounds or spills onto another app.",
+      "acceptanceCriteria": [
+        "Borderless transparent non-activating NSPanel (.nonactivatingPanel, ignoresMouseEvents=true, canBecomeKey/Main=false, high level, .canJoinAllSpaces/.stationary); CALayer sprite; frame == target window screen rect (via _AXUIElementGetWindow + getWindowBounds); sprite clamped to that rect",
+        "Decorative only - never routes through the system cursor, never warps, never foregrounds",
+        "MANUAL-VERIFY: a ghost cursor appears on the driven window, never spills onto another app, and clicking through it hits the underlying app",
+        "Linux gate green (pure GhostCursorController palette + clampPointToWindow + per-window registry already testable)"
+      ],
+      "priority": 52,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-052",
+      "title": "Ghost cursor window tracking (sec7.2)",
+      "description": "As the overlay, I want the cursor to follow the window and hide when it is gone.",
+      "acceptanceCriteria": [
+        "Follow window frame on move/resize; hide on minimize/close/off-Space; reposition across displays",
+        "MANUAL-VERIFY: drag/resize the driven window -> the ghost follows; minimize -> it hides",
+        "Linux gate green"
+      ],
+      "priority": 53,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-053",
+      "title": "Multi-cursor identity (sec7.3, K2)",
+      "description": "As multi-agent UX, I want N sessions to render N visually-distinct cursors keyed by window.",
+      "acceptanceCriteria": [
+        "Keyed by windowId; N sessions => N cursors; each a distinct translucent tint from a rotating palette",
+        "MANUAL-VERIFY: two concurrent sessions show two visually-distinct cursors on two apps",
+        "Linux gate green (registry/palette logic fake-tested)"
+      ],
+      "priority": 54,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-054",
+      "title": "Ghost cursor animations (sec7.3)",
+      "description": "As polish, I want scoot/pulse/wiggle/highlight driven off the logical cursor chokepoint.",
+      "acceptanceCriteria": [
+        "Core Animation: bezier scoot to target on moveTo(animated:true), click pulse, optional wiggle-while-thinking, element-bounds highlight - driven off BackgroundCursor position changes (single chokepoint)",
+        "MANUAL-VERIFY: moving/clicking shows the scoot + pulse on the driven window only",
+        "Linux gate green"
+      ],
+      "priority": 55,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-055",
+      "title": "Occlusion clipping v2 (sec7.2)",
+      "description": "As correctness of the overlay, I want the cursor clipped to the window visible region and hidden when fully occluded.",
+      "acceptanceCriteria": [
+        "Clip to the window visible region (subtract higher windows via CGS z-order); hide cursor when target fully occluded",
+        "MANUAL-VERIFY: covering the driven window with another app hides/clips the ghost correctly",
+        "Linux gate green"
+      ],
+      "priority": 56,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-056",
+      "title": "Multi-session parallel-cursor acceptance test (K2)",
+      "description": "As the multi-agent gate, I want two apps driven at once with two cursors and zero foregrounding.",
+      "acceptanceCriteria": [
+        "A multi-session test drives 2+ apps concurrently (private per-session event source enables it); asserts no cross-talk, no foregrounding",
+        "MANUAL-VERIFY: Slack + Mail driven at once, two cursors, neither app foregrounded",
+        "Linux gate green"
+      ],
+      "priority": 57,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
