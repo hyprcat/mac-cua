@@ -62,6 +62,11 @@ public final class Node {
     public var placeholder: String?
     public var helpText: String?
     public var valueDescription: String?
+    // Numeric value bounds (sliders/steppers) + current selection text (A3).
+    public var minValue: String?
+    public var maxValue: String?
+    public var selectedText: String?
+    public var positionInSet: Int?
     public var position: Point?
     public var size: Size?
     /// Opaque AX handle — never serialized (repr=False in Python).
@@ -100,6 +105,10 @@ public final class Node {
         placeholder: String? = nil,
         helpText: String? = nil,
         valueDescription: String? = nil,
+        minValue: String? = nil,
+        maxValue: String? = nil,
+        selectedText: String? = nil,
+        positionInSet: Int? = nil,
         position: Point? = nil,
         size: Size? = nil,
         axRef: AXElementRef? = nil,
@@ -129,6 +138,10 @@ public final class Node {
         self.placeholder = placeholder
         self.helpText = helpText
         self.valueDescription = valueDescription
+        self.minValue = minValue
+        self.maxValue = maxValue
+        self.selectedText = selectedText
+        self.positionInSet = positionInSet
         self.position = position
         self.size = size
         self.axRef = axRef

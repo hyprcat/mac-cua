@@ -54,13 +54,19 @@ public enum AXAttr {
     public static let selected = "AXSelected"
     public static let expanded = "AXExpanded"
     public static let focused = "AXFocused"
+    // A3 rich attributes (US-018): numeric bounds, current selection, set position.
+    public static let minValue = "AXMinValue"
+    public static let maxValue = "AXMaxValue"
+    public static let selectedText = "AXSelectedText"
+    public static let positionInSet = "AXARIAPosInSet"
     public static let children = "AXChildren"
 
-    /// The exact 15-attribute batch list the Kit reader fetches per element.
+    /// The exact attribute batch list the Kit reader fetches per element.
+    /// `children` stays last (read on the dedicated child path, skipped as scalar).
     public static let batch: [String] = [
         role, title, description, value, valueDescription, placeholder, help,
         subrole, identifier, roleDescription, enabled, selected, expanded,
-        focused, children,
+        focused, minValue, maxValue, selectedText, positionInSet, children,
     ]
 }
 
@@ -149,6 +155,17 @@ public enum AXWalkLogic {
         }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Extract an integer from a numeric AX scalar (e.g. position-in-set).
+    /// Returns nil for non-numeric / absent values.
+    public static func intValue(_ scalar: AXScalar?) -> Int? {
+        switch scalar {
+        case .int(let i): return i
+        case .double(let d) where d.isFinite: return Int(d)
+        case .string(let s): return Int(s.trimmingCharacters(in: .whitespaces))
+        default: return nil
+        }
     }
 
     /// Port of `_value_type_name`.
@@ -347,6 +364,10 @@ public enum AXWalk {
                 placeholder: AXWalkLogic.cleanText(attrs[AXAttr.placeholder]),
                 helpText: AXWalkLogic.cleanText(attrs[AXAttr.help]),
                 valueDescription: AXWalkLogic.cleanText(attrs[AXAttr.valueDescription]),
+                minValue: AXWalkLogic.cleanText(attrs[AXAttr.minValue]),
+                maxValue: AXWalkLogic.cleanText(attrs[AXAttr.maxValue]),
+                selectedText: AXWalkLogic.cleanText(attrs[AXAttr.selectedText]),
+                positionInSet: AXWalkLogic.intValue(attrs[AXAttr.positionInSet]),
                 axRef: element,
                 isWebArea: isWebArea,
                 isOop: isOop,

@@ -45,8 +45,15 @@ private func axScalar(from value: CFTypeRef) -> AXScalar? {
     }
     // AXValue (geometry/range), AXUIElement, arrays, AX error values, etc. are
     // not scalar attributes — the walk reads children/geometry via dedicated
-    // paths, so skip them here (mirrors Python `_is_ax_error_value` + type gate).
+    // paths, so skip them here.
     return nil
+}
+
+/// Detect a batch AX-error entry via the proper SPI `AXValueGetType(v) == .axError`
+/// instead of Python's string-sniffing hack (SWIFT_PORT_DESIGN §A3 / line 251).
+private func isAXErrorValue(_ value: CFTypeRef) -> Bool {
+    guard CFGetTypeID(value) == AXValueGetTypeID() else { return false }
+    return AXValueGetType((value as! AXValue)) == .axError
 }
 
 private func urlString(_ value: CFTypeRef?) -> String? {
@@ -76,6 +83,8 @@ private final class KitAXTreeReader: AXTreeReader {
         for (i, attr) in AXAttr.batch.enumerated() where i < values.count {
             // `AXChildren` is read on the dedicated child path, not as a scalar.
             if attr == AXAttr.children { continue }
+            // Skip batch AX-error entries (detected via AXValueGetType, Inv/§A3).
+            if isAXErrorValue(values[i]) { continue }
             if let scalar = axScalar(from: values[i]) { out[attr] = scalar }
         }
         return AXAttributes(out)

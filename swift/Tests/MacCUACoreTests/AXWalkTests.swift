@@ -143,6 +143,56 @@ final class AXWalkTests: XCTestCase {
         XCTAssertTrue(nodes[0].secondaryActions.isEmpty)
     }
 
+    // MARK: walk: A3 rich attribute population (US-018)
+
+    func testRichAttributePopulation() {
+        let slider = FakeEl(attrs: [
+            AXAttr.role: .string("AXSlider"),
+            AXAttr.value: .double(0.5),
+            AXAttr.minValue: .double(0.0),
+            AXAttr.maxValue: .double(1.0),
+            AXAttr.positionInSet: .int(3),
+        ])
+        let field = FakeEl(attrs: [
+            AXAttr.role: .string("AXTextField"),
+            AXAttr.value: .string("hello world"),
+            AXAttr.selectedText: .string("world"),
+        ])
+        let root = FakeEl(attrs: role("AXWindow"), children: [slider, field])
+        let nodes = AXWalk.walk(root: root, reader: FakeAXReader(), targetPid: nil)
+
+        let sliderNode = nodes.first { $0.axRole == "AXSlider" }!
+        XCTAssertEqual(sliderNode.minValue, "0")
+        XCTAssertEqual(sliderNode.maxValue, "1")
+        XCTAssertEqual(sliderNode.positionInSet, 3)
+        XCTAssertNil(sliderNode.selectedText)
+
+        let fieldNode = nodes.first { $0.axRole == "AXTextField" }!
+        XCTAssertEqual(fieldNode.selectedText, "world")
+        XCTAssertNil(fieldNode.minValue)
+        XCTAssertNil(fieldNode.positionInSet)
+    }
+
+    func testRichAttributesAbsentByDefault() {
+        let node = AXWalk.walk(
+            root: FakeEl(attrs: role("AXButton")), reader: FakeAXReader(), targetPid: nil)[0]
+        XCTAssertNil(node.minValue)
+        XCTAssertNil(node.maxValue)
+        XCTAssertNil(node.selectedText)
+        XCTAssertNil(node.positionInSet)
+    }
+
+    // MARK: intValue
+
+    func testIntValue() {
+        XCTAssertEqual(AXWalkLogic.intValue(.int(5)), 5)
+        XCTAssertEqual(AXWalkLogic.intValue(.double(2.0)), 2)
+        XCTAssertEqual(AXWalkLogic.intValue(.string(" 7 ")), 7)
+        XCTAssertNil(AXWalkLogic.intValue(.string("abc")))
+        XCTAssertNil(AXWalkLogic.intValue(.bool(true)))
+        XCTAssertNil(AXWalkLogic.intValue(nil))
+    }
+
     // MARK: cleanText
 
     func testCleanText() {
