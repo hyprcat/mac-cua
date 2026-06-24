@@ -252,7 +252,7 @@
         "Linux gate green"
       ],
       "priority": 18,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -266,7 +266,7 @@
         "Linux gate green"
       ],
       "priority": 19,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

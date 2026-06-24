@@ -201,6 +201,16 @@ public protocol AccessibilityProvider: AnyObject {
     func getMenuBar(axApp: AXElementRef) -> AXElementRef?
     func getWindowTitle(axWindow: AXElementRef) -> String?
 
+    /// Enable the Chromium/Electron AX tree (A1): set `AXEnhancedUserInterface` +
+    /// `AXManualAccessibility` = true on the AXApplication element so it exposes a
+    /// tree. Remembered per-app (set at most once), reversible, logged. This is a
+    /// sanctioned app-config write — it does NOT focus/raise/activate (Inv 7). The
+    /// first walk after enabling is expected empty; the caller re-walks per
+    /// `EnhancedUIRewalkPolicy`. Returns true if it applied the write this call,
+    /// false if already enabled / not applicable.
+    @discardableResult
+    func enableEnhancedUI(axApp: AXElementRef, pid: Int) throws -> Bool
+
     // Element queries (reads)
     func getFocusedElement(axApp: AXElementRef, tree: [Node]) -> Int?
     func getElementFrame(node: Node) -> Rect?
@@ -225,6 +235,13 @@ public protocol AccessibilityProvider: AnyObject {
     func extractWebAreaText(_ element: AXElementRef, targetPid: Int?) -> String?
     func extractTextAreaContent(_ element: AXElementRef, targetPid: Int?) -> String?
     func getWebURL(_ element: AXElementRef) -> String?
+}
+
+public extension AccessibilityProvider {
+    /// Default no-op: providers without a real AX layer (fakes, Linux) simply do
+    /// not enable enhanced UI. The real write lives in MacCUAKit.
+    @discardableResult
+    func enableEnhancedUI(axApp: AXElementRef, pid: Int) throws -> Bool { false }
 }
 
 // MARK: - InputProvider (input.py)

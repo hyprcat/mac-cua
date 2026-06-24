@@ -123,6 +123,12 @@ final class FakeAccessibility: AccessibilityProvider {
         if let windowList { return windowList }
         return keyWindow.map { [$0] } ?? []
     }
+    /// Records enableEnhancedUI(pid:) calls so spine tests assert A1 priming.
+    private(set) var enhancedUIPids: [Int] = []
+    func enableEnhancedUI(axApp: AXElementRef, pid: Int) throws -> Bool {
+        enhancedUIPids.append(pid)
+        return true
+    }
     func getMenuBar(axApp: AXElementRef) -> AXElementRef? { nil }
     func getWindowTitle(axWindow: AXElementRef) -> String? { "Untitled" }
     func getFocusedElement(axApp: AXElementRef, tree: [Node]) -> Int? { focusedIndex }

@@ -51,6 +51,8 @@ public final class AppSession {
     public var settleMonitor: SettleMonitor?
     public var refetchableTree: RefetchableTree?
     public var guidanceDelivered: Bool = false
+    /// Whether Chromium/Electron enhanced UI was primed for this session (A1).
+    public var enhancedUIPrimed: Bool = false
 
     // Input strategy + delivery.
     public var inputStrategy: InputStrategy?

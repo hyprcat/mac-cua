@@ -318,6 +318,39 @@ extension SessionManager {
         if flags.confirmedDelivery && session.eventSource == nil {
             session.eventSource = providers.input.createEventSource()
         }
+        primeEnhancedUI(session)
+    }
+
+    /// Enable the Chromium/Electron AX tree on attach (A1, US-019): set
+    /// enhanced-UI on the AXApplication, then re-walk a few times until the tree
+    /// is non-empty or the attempts are exhausted (the first walk is expected
+    /// empty). Per-app/remembered (`enhancedUIPrimed` guards re-priming this
+    /// session; the provider's tracker guards the actual write). The poll loop's
+    /// stop condition is the pure `EnhancedUIRewalkPolicy`.
+    func primeEnhancedUI(_ session: AppSession) {
+        guard !session.enhancedUIPrimed else { return }
+        guard EnhancedUIPolicy.shouldEnable(for: session.appType) else { return }
+        session.enhancedUIPrimed = true
+
+        let applied = (try? providers.accessibility.enableEnhancedUI(
+            axApp: session.target.axApp, pid: session.target.pid)) ?? false
+        guard applied else { return }
+
+        // Re-walk poll: the first walk after enabling is expected empty.
+        let policy = EnhancedUIRewalkPolicy()
+        var attempt = 0
+        var nodeCount = 0
+        while policy.shouldContinue(attempt: attempt, nodeCount: nodeCount) {
+            if attempt > 0 && policy.pollIntervalMs > 0 {
+                Thread.sleep(forTimeInterval: Double(policy.pollIntervalMs) / 1000.0)
+            }
+            attempt += 1
+            let nodes = (try? providers.accessibility.walkTree(
+                axElement: session.target.axWindow, targetPid: session.target.pid,
+                maxDepth: defaultMaxDepth, maxNodes: defaultMaxNodes,
+                includeActions: false, includeStates: false)) ?? []
+            nodeCount = nodes.count
+        }
     }
 
     /// Stop and clear a session's monitors. Replaces `_teardown_observer`

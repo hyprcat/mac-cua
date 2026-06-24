@@ -142,8 +142,60 @@ private final class KitAXTreeReader: AXTreeReader {
 public final class KitAccessibilityProvider: AccessibilityProvider {
     private let reader = KitAXTreeReader()
     private let assertions = AssertionTracker()
+    /// Per-app remembered/reversible enhanced-UI state (A1, US-019).
+    private let enhancedUI = EnhancedUITracker()
 
     public init() {}
+
+    // MARK: Enhanced UI (A1) — Chromium/Electron tree enablement
+
+    private static let enhancedUIAttr = "AXEnhancedUserInterface"
+    private static let manualAccessibilityAttr = "AXManualAccessibility"
+
+    /// Set `AXEnhancedUserInterface` + `AXManualAccessibility` = true on the
+    /// AXApplication element so Chromium/Electron expose their tree. Remembered
+    /// per-app (set at most once), reversible (prior values captured), logged. A
+    /// sanctioned app-config write — it never focuses/raises/activates (Inv 7).
+    @discardableResult
+    public func enableEnhancedUI(axApp: AXElementRef, pid: Int) throws -> Bool {
+        if enhancedUI.isEnabled(pid: pid) { return false }
+        guard let app = axElement(axApp) else { return false }
+
+        // Capture prior values so a teardown can restore them (reversible).
+        let prior = EnhancedUITracker.PriorState(
+            enhancedUI: readBool(app, Self.enhancedUIAttr),
+            manualAccessibility: readBool(app, Self.manualAccessibilityAttr))
+
+        AXUIElementSetAttributeValue(app, Self.enhancedUIAttr as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(app, Self.manualAccessibilityAttr as CFString, kCFBooleanTrue)
+
+        enhancedUI.markEnabled(pid: pid, prior: prior)
+        FileHandle.standardError.write(Data(
+            "[mac-cua] enabled enhanced UI for pid \(pid) (prior: \(prior))\n".utf8))
+        return true
+    }
+
+    /// Restore the captured prior enhanced-UI attribute values for a pid, if any
+    /// (reversible teardown). No-op if never enabled or the app is gone.
+    public func disableEnhancedUI(axApp: AXElementRef, pid: Int) {
+        guard let prior = enhancedUI.markDisabled(pid: pid),
+              let app = axElement(axApp) else { return }
+        if let v = prior.enhancedUI {
+            AXUIElementSetAttributeValue(app, Self.enhancedUIAttr as CFString,
+                                         v ? kCFBooleanTrue : kCFBooleanFalse)
+        }
+        if let v = prior.manualAccessibility {
+            AXUIElementSetAttributeValue(app, Self.manualAccessibilityAttr as CFString,
+                                         v ? kCFBooleanTrue : kCFBooleanFalse)
+        }
+    }
+
+    private func readBool(_ el: AXUIElement, _ attr: String) -> Bool? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, attr as CFString, &value) == .success,
+              let raw = value, CFGetTypeID(raw) == CFBooleanGetTypeID() else { return nil }
+        return CFBooleanGetValue((raw as! CFBoolean))
+    }
 
     // MARK: Tree (reads)
 
