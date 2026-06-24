@@ -89,14 +89,7 @@ public final class KitCaptureProvider: CaptureProvider {
 
 // MARK: - SelectionProvider — real impl in KitSelectionProvider.swift (US-040)
 
-// MARK: - ClipboardProvider (US-041)
-
-public final class KitClipboardProvider: ClipboardProvider {
-    public init() {}
-    public func get() throws -> String? { unimplemented() }
-    public func set(_ text: String) throws { unimplemented() }
-    public func clear() throws { unimplemented() }
-}
+// MARK: - ClipboardProvider — real impl in KitClipboardProvider.swift (US-041)
 
 // MARK: - SettleMonitor — real impl in KitRunLoop.swift (US-025)
 

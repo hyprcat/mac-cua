@@ -170,5 +170,26 @@ final class StubsTests: XCTestCase {
             try p.clickAtScreenPoint(pid: -1, x: 0, y: 0,
                                      button: "wheel", count: 1, windowId: nil, source: nil))
     }
+
+    // MARK: - US-041 ClipboardProvider (NSPasteboard)
+
+    func testClipboardRoundTripsThroughIsolatedPasteboard() throws {
+        // US-041: get/set/clear are background-safe NSPasteboard ops — no app
+        // target, no focus, no activation (the pasteboard is system-wide). Use a
+        // uniquely-named NSPasteboard so the test never clobbers the user's real
+        // general clipboard. set replaces, get reads back, clear empties.
+        let pb = NSPasteboard(name: NSPasteboard.Name("mac-cua-test-\(getpid())"))
+        defer { pb.releaseGlobally() }
+        let clip = KitClipboardProvider(pasteboard: pb)
+
+        try clip.set("hello 🌍 café")
+        XCTAssertEqual(try clip.get(), "hello 🌍 café")
+
+        try clip.set("second")
+        XCTAssertEqual(try clip.get(), "second")
+
+        try clip.clear()
+        XCTAssertNil(try clip.get())
+    }
 }
 #endif
