@@ -471,3 +471,11 @@ public protocol WindowOrderingTracking: AnyObject {
     /// `start()`.
     var onChange: (([Int]) -> Void)? { get set }
 }
+
+/// Lock-screen state probe (US-047 safety guard). The Kit impl reads
+/// `CGSessionCopyCurrentDictionary()` -> `CGSSessionScreenIsLocked == 1`.
+/// Read-only — never foregrounds/activates. Returns false when the state can't
+/// be determined (fail-open on the *probe*, the input blocklist still applies).
+public protocol ScreenLockProvider: AnyObject {
+    func isScreenLocked() -> Bool
+}

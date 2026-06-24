@@ -119,6 +119,9 @@ public final class Providers {
     // Global trackers (shared across sessions).
     public let frontmostTracker: FrontmostTracking
     public let userInteractionMonitor: UserInteractionMonitoring
+    /// Lock-screen probe for the input safety guard (US-047). Optional: nil
+    /// providers (fakes/Linux) are treated as "never locked".
+    public let screenLock: ScreenLockProvider?
 
     // Per-session factories.
     public let makeSettleMonitor: (AppSession) -> SettleMonitor
@@ -138,6 +141,7 @@ public final class Providers {
         ocr: OCRProvider? = nil,
         frontmostTracker: FrontmostTracking,
         userInteractionMonitor: UserInteractionMonitoring,
+        screenLock: ScreenLockProvider? = nil,
         makeSettleMonitor: @escaping (AppSession) -> SettleMonitor,
         makeAXOutcomeMonitor: @escaping (AppSession) -> OutcomeMonitor,
         makeCGEventOutcomeMonitor: @escaping (AppSession) -> OutcomeMonitor,
@@ -154,6 +158,7 @@ public final class Providers {
         self.ocr = ocr
         self.frontmostTracker = frontmostTracker
         self.userInteractionMonitor = userInteractionMonitor
+        self.screenLock = screenLock
         self.makeSettleMonitor = makeSettleMonitor
         self.makeAXOutcomeMonitor = makeAXOutcomeMonitor
         self.makeCGEventOutcomeMonitor = makeCGEventOutcomeMonitor

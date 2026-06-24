@@ -31,6 +31,7 @@ public func makeKitProviders() -> Providers {
         ocr: KitOCRProvider(),
         frontmostTracker: KitFrontmostTracker(),
         userInteractionMonitor: KitUserInteractionMonitor(),
+        screenLock: KitScreenLockProvider(),
         makeSettleMonitor: { _ in KitSettleMonitor() },
         makeAXOutcomeMonitor: { _ in KitOutcomeMonitor() },
         makeCGEventOutcomeMonitor: { _ in KitOutcomeMonitor() },

@@ -103,7 +103,9 @@ public final class SessionManager {
         self.providers = providers
         self.flags = flags
         self.workarounds = workarounds
-        self.safety = SafetyBlocklist(allowForbidden: flags.allowForbiddenTargets)
+        self.safety = SafetyBlocklist(
+            allowForbidden: flags.allowForbiddenTargets,
+            ownBundleId: Bundle.main.bundleIdentifier)
         self.approvalStore = AppApprovalStore()
         self.lifecycle = SessionLifecycle(stepLimit: workarounds.loopStepLimit)
     }

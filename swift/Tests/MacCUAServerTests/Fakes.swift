@@ -392,6 +392,12 @@ final class FakeFrontmostTracking: FrontmostTracking {
     func currentFrontmost() -> AppInfo? { frontmost }
 }
 
+final class FakeScreenLock: ScreenLockProvider {
+    var locked: Bool
+    init(locked: Bool = false) { self.locked = locked }
+    func isScreenLocked() -> Bool { locked }
+}
+
 // MARK: - Bundle helper
 
 /// Build a `Providers` from fakes. Tests pass overrides as needed. The factory
@@ -407,6 +413,7 @@ func makeFakeProviders(
     ocr: OCRProvider? = nil,
     frontmost: FakeFrontmostTracking = FakeFrontmostTracking(),
     userInteraction: FakeUserInteraction = FakeUserInteraction(),
+    screenLock: ScreenLockProvider? = nil,
     makeSettleMonitor: @escaping (AppSession) -> SettleMonitor = { _ in FakeSettleMonitor() },
     makeMenuTracker: @escaping (AppSession) -> MenuTracking = { _ in FakeMenuTracking() },
     makeSelectionClient: @escaping (AppSession) -> SelectionProvider = { _ in FakeSelection() }
@@ -420,6 +427,7 @@ func makeFakeProviders(
         ocr: ocr,
         frontmostTracker: frontmost,
         userInteractionMonitor: userInteraction,
+        screenLock: screenLock,
         makeSettleMonitor: makeSettleMonitor,
         makeAXOutcomeMonitor: { _ in FakeOutcomeMonitor() },
         makeCGEventOutcomeMonitor: { _ in FakeOutcomeMonitor() },

@@ -136,4 +136,45 @@ final class SafetyTestsIPParsing: XCTestCase {
         XCTAssertFalse(bl.isPrivateIP("172.32.0.1"))
         XCTAssertFalse(bl.isPrivateIP("172.15.0.1"))
     }
+
+    // MARK: - US-047 input blocklist
+
+    private func inputBL(ownBundleId: String? = nil) -> SafetyBlocklist {
+        SafetyBlocklist(resolver: FakeDNSResolver(table: [:]), ownBundleId: ownBundleId)
+    }
+
+    func testInputTerminalBlocked() {
+        for id in ["com.apple.Terminal", "com.googlecode.iterm2", "dev.warp.Warp-Stable",
+                   "net.kovidgoyal.kitty", "io.alacritty"] {
+            XCTAssertNotNil(inputBL().checkInputApp(id), "expected \(id) blocked for input")
+        }
+    }
+
+    func testInputKeychainAndSecurityBlocked() {
+        XCTAssertNotNil(inputBL().checkInputApp("com.apple.keychainaccess"))
+        XCTAssertNotNil(inputBL().checkInputApp("com.apple.SecurityAgent"))
+        XCTAssertNotNil(inputBL().checkInputApp("com.apple.CoreServicesUIAgent"))
+        XCTAssertNotNil(inputBL().checkInputApp("com.apple.Passwords"))
+    }
+
+    func testInputOwnProcessBlocked() {
+        let bl = inputBL(ownBundleId: "com.example.maccua")
+        XCTAssertNotNil(bl.checkInputApp("com.example.maccua"))
+        XCTAssertNil(bl.checkInputApp("com.apple.Safari"))
+    }
+
+    func testInputNormalAppAllowed() {
+        XCTAssertNil(inputBL().checkInputApp("com.apple.Safari"))
+        XCTAssertNil(inputBL().checkInputApp("com.tinyspeck.slackmacgap"))
+    }
+
+    func testInputBlocklistIgnoresAllowForbidden() {
+        // Unlike checkApp/checkURL, the input gate is NOT relaxed by allow_forbidden.
+        let bl = SafetyBlocklist(allowForbidden: true, resolver: FakeDNSResolver(table: [:]))
+        XCTAssertNotNil(bl.checkInputApp("com.apple.Terminal"))
+    }
+
+    func testNilOwnBundleIdDoesNotCrash() {
+        XCTAssertNil(inputBL(ownBundleId: nil).checkInputApp("com.apple.Safari"))
+    }
 }

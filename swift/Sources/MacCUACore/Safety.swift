@@ -27,6 +27,35 @@ public let blockedApps: Set<String> = [
     "com.apple.UserNotificationCenter",
 ]
 
+/// Apps that must never receive *synthetic input* (Codex parity §G). These are
+/// in addition to `blockedApps`: terminal emulators (a stray keystroke can run
+/// destructive shell commands), admin-authorization / security-privacy prompts,
+/// and Keychain. Reads (`get_app_state`) are still permitted — only input is
+/// refused — so the model can see, but not act on, these surfaces.
+public let inputBlockedApps: Set<String> = [
+    // Terminal emulators.
+    "com.apple.Terminal",
+    "com.googlecode.iterm2",
+    "dev.warp.Warp-Stable",
+    "co.zeit.hyper",
+    "net.kovidgoyal.kitty",
+    "com.github.wez.wezterm",
+    "io.alacritty",
+    // Admin-auth / security-privacy prompts (also covered by blockedApps's
+    // SecurityAgent; listed here so input is refused even if the read blocklist
+    // is bypassed via allow_forbidden for diagnostics).
+    "com.apple.SecurityAgent",
+    "com.apple.CoreServicesUIAgent",
+    "com.apple.security.authhost",
+    "com.apple.keychainaccess",
+    "com.apple.Passwords",
+]
+
+/// Reason emitted when synthetic input is refused because the screen is locked.
+/// Mirrors the Codex lock-screen guard (§G / §K).
+public let lockScreenInputRefusal =
+    "Automation input is refused because the screen is locked."
+
 /// Session-stop guidance string emitted when automation hits a blocked URL.
 /// Mirrors `SESSION_STOP_SAFETY`.
 public let sessionStopSafety =
@@ -255,10 +284,16 @@ struct IPAddress {
 public final class SafetyBlocklist {
     private let allowForbidden: Bool
     private let resolver: DNSResolver
+    private let ownBundleId: String?
 
-    public init(allowForbidden: Bool = false, resolver: DNSResolver = SystemDNSResolver()) {
+    public init(
+        allowForbidden: Bool = false,
+        resolver: DNSResolver = SystemDNSResolver(),
+        ownBundleId: String? = nil
+    ) {
         self.allowForbidden = allowForbidden
         self.resolver = resolver
+        self.ownBundleId = ownBundleId
     }
 
     /// Returns block reason or nil if allowed. Mirrors `check_app`.
@@ -266,6 +301,21 @@ public final class SafetyBlocklist {
         if allowForbidden { return nil }
         if blockedApps.contains(bundleId) {
             return "Automation is not allowed for system security process: \(bundleId)"
+        }
+        return nil
+    }
+
+    /// Returns block reason or nil if synthetic input is allowed against
+    /// `bundleId`. Stricter than `checkApp`: also refuses terminals, our own
+    /// process (no self-driving), and admin-auth / security prompts. `allow_forbidden`
+    /// is intentionally NOT honored here — these targets are never safe to type
+    /// into. Mirrors the Codex parity extension (§G).
+    public func checkInputApp(_ bundleId: String) -> String? {
+        if let own = ownBundleId, !own.isEmpty, bundleId == own {
+            return "Automation is not allowed to send input to its own process: \(bundleId)"
+        }
+        if inputBlockedApps.contains(bundleId) {
+            return "Automation input is not allowed for sensitive process: \(bundleId)"
         }
         return nil
     }

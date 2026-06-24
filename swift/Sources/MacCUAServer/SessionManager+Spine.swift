@@ -239,6 +239,20 @@ extension SessionManager {
         }
     }
 
+    /// Input-only safety gate (US-047 / Codex parity §G). Refuses synthetic
+    /// input against terminals, our own process, and admin-auth / Keychain
+    /// prompts, and refuses ALL input while the screen is locked. Reads
+    /// (`get_app_state`) bypass this — only the input tools call it (via
+    /// `dispatch`). Fails honestly (throws) — there is NO foregrounding fallback.
+    func checkInputSafety(_ bundleId: String) throws {
+        if let reason = safety.checkInputApp(bundleId) {
+            throw AutomationError.appBlocked(reason)
+        }
+        if let lock = providers.screenLock, lock.isScreenLocked() {
+            throw AutomationError.safety(lockScreenInputRefusal)
+        }
+    }
+
     /// Ports `_check_approval` (session.py:302). Auto-approves for the session.
     func checkApproval(_ bundleId: String) {
         if !approvalStore.isApproved(bundleId) {
@@ -729,7 +743,18 @@ extension SessionManager {
 
     /// Route a resolved tool to its handler (handlers live in the +Handlers
     /// file). Ports `_dispatch` (session.py:2689).
+    /// Tools that deliver synthetic input (subject to the US-047 input gate).
+    static let inputTools: Set<String> = [
+        "click", "type_text", "set_value", "press_key",
+        "scroll", "drag", "perform_secondary_action",
+    ]
+
     func dispatch(_ tool: String, _ session: AppSession, _ params: [String: Any]) throws -> String {
+        // Input safety gate (US-047): refuse input against sensitive targets and
+        // at the lock screen. Read-only tools (get_app_state) are exempt.
+        if SessionManager.inputTools.contains(tool) {
+            try checkInputSafety(session.target.bundleId)
+        }
         switch tool {
         case "get_app_state": return "App state retrieved."
         case "click": return try handleClick(session, params)
