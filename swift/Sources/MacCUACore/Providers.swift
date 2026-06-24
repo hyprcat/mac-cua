@@ -303,6 +303,31 @@ public protocol SelectionProvider: AnyObject {
     func stopObserving()
     /// Current system selection as model-facing formatted text, or nil.
     func currentSelection() -> String?
+
+    // MARK: select_text seam (US-010 wiring; real impl is US-040)
+
+    /// Full text of the selection target — the element's text when `axRef` is
+    /// supplied, otherwise the focused field. Feeds the pure `SelectTextResolver`
+    /// (US-005) so the spine can turn a content/prefix/suffix request into an
+    /// unambiguous range. Throws when there is no selectable target/text.
+    func selectableText(axRef: AXElementRef?) throws -> String
+    /// Apply a resolved selection (or zero-length caret) range to the target.
+    /// Background-only: never raises/focuses/activates the window (Invariant 7).
+    func applySelection(axRef: AXElementRef?, range: TextRange) throws
+}
+
+// MARK: - ClipboardProvider (clipboard tool, design D2)
+
+/// Background-safe pasteboard access (`NSPasteboard` in the Kit impl, US-041).
+/// Read/write/clear without focus or activation — the pasteboard is system-wide,
+/// so no app target is required and no window is ever foregrounded.
+public protocol ClipboardProvider: AnyObject {
+    /// Current plain-text clipboard contents, or nil when empty/non-text.
+    func get() throws -> String?
+    /// Replace the clipboard with `text`.
+    func set(_ text: String) throws
+    /// Clear the clipboard.
+    func clear() throws
 }
 
 // MARK: - SettleMonitor (observer.py, §5.3 polling design)

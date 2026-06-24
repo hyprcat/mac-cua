@@ -302,4 +302,66 @@ public var toolDefs: [ToolDef] {[
             "additionalProperties": false,
         ]
     ),
+    // Codex parity §D1 (US-010 wiring): select text or place the caret in a field
+    // by content, with prefix/suffix disambiguation when the substring repeats.
+    // Background-only — never raises or focuses the window. Real Mac selection is
+    // US-040; the range resolution is the pure US-005 resolver.
+    ToolDef(
+        name: "select_text",
+        description: (
+            "Select a run of text (or place the caret) in a text element by its "
+            + "content. Give the exact 'content' to select; if it appears more than "
+            + "once, disambiguate with 'prefix' (text immediately before) and/or "
+            + "'suffix' (text immediately after). Use 'caret' to place an insertion "
+            + "point instead of a selection: 'before' / 'after' collapse to the "
+            + "start / end of the match. Target via window_id (preferred) or app, "
+            + "and optionally element_index to pick the field; otherwise the focused "
+            + "field is used. Stays background-targeted and does not activate the "
+            + "window."
+        ),
+        inputSchema: [
+            "type": "object",
+            "properties": [
+                "app": ["type": "string", "description": "App name or bundle identifier"],
+                "window_id": ["type": "integer", "description": "Target window ID from the latest get_app_state; preferred over app"],
+                "element_index": ["type": "string", "description": "Element index of the text field/area to select within (defaults to the focused field)"],
+                "content": ["type": "string", "description": "The exact text to select (or to place the caret relative to)"],
+                "prefix": ["type": "string", "description": "Text immediately before the match, used to disambiguate when content repeats"],
+                "suffix": ["type": "string", "description": "Text immediately after the match, used to disambiguate when content repeats"],
+                "caret": [
+                    "type": "string",
+                    "enum": ["select", "before", "after"],
+                    "description": "select = highlight the match (default); before/after = place the caret at the start/end of the match",
+                    "default": "select",
+                ],
+            ],
+            "required": ["content"],
+            "additionalProperties": false,
+        ]
+    ),
+    // Codex parity §D2 (US-010 wiring): background-safe clipboard read/write/clear.
+    // The pasteboard is system-wide, so no app target is needed and nothing is
+    // ever foregrounded. Real Mac NSPasteboard impl is US-041.
+    ToolDef(
+        name: "clipboard",
+        description: (
+            "Read, write, or clear the system clipboard (pasteboard). action='get' "
+            + "returns the current text; action='set' replaces it with 'text'; "
+            + "action='clear' empties it. The clipboard is system-wide — this does "
+            + "not require or affect any particular app and never changes focus."
+        ),
+        inputSchema: [
+            "type": "object",
+            "properties": [
+                "action": [
+                    "type": "string",
+                    "enum": ["get", "set", "clear"],
+                    "description": "Clipboard operation to perform",
+                ],
+                "text": ["type": "string", "description": "Text to put on the clipboard (required for action='set')"],
+            ],
+            "required": ["action"],
+            "additionalProperties": false,
+        ]
+    ),
 ]}

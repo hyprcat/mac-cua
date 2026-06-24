@@ -108,6 +108,8 @@ public final class Providers {
     public let input: InputProvider
     public let capture: CaptureProvider
     public let analytics: Analytics
+    /// System pasteboard (clipboard tool, US-010 wiring / US-041 real impl).
+    public let clipboard: ClipboardProvider
 
     // Global trackers (shared across sessions).
     public let frontmostTracker: FrontmostTracking
@@ -127,6 +129,7 @@ public final class Providers {
         input: InputProvider,
         capture: CaptureProvider,
         analytics: Analytics = NoopAnalytics(),
+        clipboard: ClipboardProvider,
         frontmostTracker: FrontmostTracking,
         userInteractionMonitor: UserInteractionMonitoring,
         makeSettleMonitor: @escaping (AppSession) -> SettleMonitor,
@@ -141,6 +144,7 @@ public final class Providers {
         self.input = input
         self.capture = capture
         self.analytics = analytics
+        self.clipboard = clipboard
         self.frontmostTracker = frontmostTracker
         self.userInteractionMonitor = userInteractionMonitor
         self.makeSettleMonitor = makeSettleMonitor

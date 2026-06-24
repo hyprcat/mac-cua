@@ -248,9 +248,52 @@ final class FakeCapture: CaptureProvider {
 
 final class FakeSelection: SelectionProvider {
     var selection: String?
+    // --- select_text seam hooks (US-010) ---
+    /// Text returned by `selectableText` (the field's whole contents).
+    var text: String = ""
+    /// Make `selectableText` throw (no target / no focused field).
+    var selectableTextThrows = false
+    /// Make `applySelection` throw (selection failed in the real impl).
+    var applyThrows = false
+    private(set) var appliedRanges: [MacCUACore.TextRange] = []
+    private(set) var selectableTextCalls: [Bool] = []  // recorded: was an axRef supplied?
+
     func startObserving(pid: Int) {}
     func stopObserving() {}
     func currentSelection() -> String? { selection }
+    func selectableText(axRef: AXElementRef?) throws -> String {
+        selectableTextCalls.append(axRef != nil)
+        if selectableTextThrows { throw AutomationError.ax("no selectable text target") }
+        return text
+    }
+    func applySelection(axRef: AXElementRef?, range: MacCUACore.TextRange) throws {
+        if applyThrows { throw AutomationError.ax("selection apply failed") }
+        appliedRanges.append(range)
+    }
+}
+
+final class FakeClipboard: ClipboardProvider {
+    var contents: String?
+    var getThrows = false
+    var setThrows = false
+    var clearThrows = false
+    private(set) var sets: [String] = []
+    private(set) var clears = 0
+
+    func get() throws -> String? {
+        if getThrows { throw AutomationError.automation("clipboard get failed") }
+        return contents
+    }
+    func set(_ text: String) throws {
+        if setThrows { throw AutomationError.automation("clipboard set failed") }
+        contents = text
+        sets.append(text)
+    }
+    func clear() throws {
+        if clearThrows { throw AutomationError.automation("clipboard clear failed") }
+        contents = nil
+        clears += 1
+    }
 }
 
 final class FakeSettleMonitor: SettleMonitor {
@@ -332,6 +375,7 @@ func makeFakeProviders(
     accessibility: FakeAccessibility = FakeAccessibility(),
     input: FakeInput = FakeInput(),
     capture: FakeCapture = FakeCapture(),
+    clipboard: FakeClipboard = FakeClipboard(),
     frontmost: FakeFrontmostTracking = FakeFrontmostTracking(),
     userInteraction: FakeUserInteraction = FakeUserInteraction(),
     makeSettleMonitor: @escaping (AppSession) -> SettleMonitor = { _ in FakeSettleMonitor() },
@@ -343,6 +387,7 @@ func makeFakeProviders(
         accessibility: accessibility,
         input: input,
         capture: capture,
+        clipboard: clipboard,
         frontmostTracker: frontmost,
         userInteractionMonitor: userInteraction,
         makeSettleMonitor: makeSettleMonitor,

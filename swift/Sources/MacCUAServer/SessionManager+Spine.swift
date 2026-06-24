@@ -54,6 +54,14 @@ extension SessionManager {
             return executeWait(params)
         }
 
+        if tool == "select_text" {
+            return executeSelectText(params)
+        }
+
+        if tool == "clipboard" {
+            return executeClipboard(params)
+        }
+
         var session: AppSession?
         var previousFrontmost: AppInfo?
 

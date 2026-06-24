@@ -24,10 +24,13 @@ final class ServerLayerTests: XCTestCase {
             "perform_secondary_action",
             "batch",
             "wait",
+            "select_text",
+            "clipboard",
         ])
         // server.py's TOOL_DEFS has 9 entries (list_apps + the 8 action tools);
-        // `batch` (§D3, US-008) + `wait` (§D4, US-009) are appended → 11.
-        XCTAssertEqual(toolDefs.count, 11)
+        // `batch` (§D3, US-008) + `wait` (§D4, US-009) + `select_text` (§D1) +
+        // `clipboard` (§D2) (US-010) are appended → 13.
+        XCTAssertEqual(toolDefs.count, 13)
     }
 
     func testToolDefRequiredFieldsMatchPython() {
@@ -47,6 +50,8 @@ final class ServerLayerTests: XCTestCase {
         XCTAssertEqual(required("set_value"), ["element_index", "value"])
         XCTAssertEqual(required("scroll"), ["direction"])
         XCTAssertEqual(required("perform_secondary_action"), ["element_index", "action"])
+        XCTAssertEqual(required("select_text"), ["content"])
+        XCTAssertEqual(required("clipboard"), ["action"])
     }
 
     func testToolDefDescriptionsCopiedVerbatim() {
@@ -222,8 +227,8 @@ final class ServerLayerTests: XCTestCase {
             permissions: PermissionsGate(apps: FakeAppResolver(), capture: FakeCapture())
         )
         XCTAssertEqual(server.listTools().map(\.name).first, "list_apps")
-        XCTAssertEqual(server.listTools().count, 11)
-        XCTAssertEqual(server.listTools().map(\.name).last, "wait")
+        XCTAssertEqual(server.listTools().count, 13)
+        XCTAssertEqual(server.listTools().map(\.name).last, "clipboard")
     }
 
     func testMCPServerCallToolGateReturnsPendingMessage() {
