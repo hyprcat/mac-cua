@@ -564,7 +564,7 @@
         "Linux gate green (range resolution already covered)"
       ],
       "priority": 41,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

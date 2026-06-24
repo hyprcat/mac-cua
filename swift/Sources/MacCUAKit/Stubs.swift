@@ -87,16 +87,7 @@ public final class KitCaptureProvider: CaptureProvider {
     }
 }
 
-// MARK: - SelectionProvider (US-040)
-
-public final class KitSelectionProvider: SelectionProvider {
-    public init() {}
-    public func startObserving(pid: Int) {}
-    public func stopObserving() {}
-    public func currentSelection() -> String? { nil }
-    public func selectableText(axRef: AXElementRef?) throws -> String { unimplemented() }
-    public func applySelection(axRef: AXElementRef?, range: MacCUACore.TextRange) throws { unimplemented() }
-}
+// MARK: - SelectionProvider — real impl in KitSelectionProvider.swift (US-040)
 
 // MARK: - ClipboardProvider (US-041)
 
