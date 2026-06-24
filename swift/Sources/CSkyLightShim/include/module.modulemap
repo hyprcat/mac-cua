@@ -1,0 +1,4 @@
+module CSkyLightShim {
+    header "CSkyLightShim.h"
+    export *
+}

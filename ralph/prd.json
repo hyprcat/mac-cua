@@ -194,7 +194,7 @@
         "Linux gate: Core/Server swift build && swift test green (Kit excluded)"
       ],
       "priority": 14,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
