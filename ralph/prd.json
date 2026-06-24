@@ -320,7 +320,7 @@
         "Linux gate green (sizing/downscale math fake-tested)"
       ],
       "priority": 23,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

@@ -30,6 +30,13 @@ public protocol CapturedImage: AnyObject {
     var height: Int { get }
     /// Base64-encoded PNG, ready to attach as an MCP `ImageContent` block.
     func pngBase64() -> String
+    /// Frame provenance (produced dims, backing scale, crop origin, window/display
+    /// identity). `nil` for fakes / paths that don't populate it (US-023, B4).
+    var captureMetadata: CaptureMetadata? { get }
+}
+
+public extension CapturedImage {
+    var captureMetadata: CaptureMetadata? { nil }
 }
 
 /// Precise editable-text manipulation over an AX text element (a wrapper around

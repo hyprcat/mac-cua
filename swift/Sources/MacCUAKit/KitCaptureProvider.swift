@@ -24,7 +24,16 @@ import ScreenCaptureKit
 /// Real captured-window image: wraps a `CGImage`, encodes PNG via ImageIO.
 public final class KitCapturedImage: CapturedImage {
     let cgImage: CGImage
-    public init(_ cgImage: CGImage) { self.cgImage = cgImage }
+    /// Longest-side cap applied at encode via `kCGImageDestinationImageMaxPixelSize`
+    /// (belt-and-suspenders for the GPU `scalesToFit` downscale). `nil` = native.
+    let maxPixelSize: Int?
+    public let captureMetadata: CaptureMetadata?
+
+    public init(_ cgImage: CGImage, maxPixelSize: Int? = nil, metadata: CaptureMetadata? = nil) {
+        self.cgImage = cgImage
+        self.maxPixelSize = maxPixelSize
+        self.captureMetadata = metadata
+    }
 
     public var width: Int { cgImage.width }
     public var height: Int { cgImage.height }
@@ -34,7 +43,13 @@ public final class KitCapturedImage: CapturedImage {
         guard let dest = CGImageDestinationCreateWithData(
             data, "public.png" as CFString, 1, nil
         ) else { return "" }
-        CGImageDestinationAddImage(dest, cgImage, nil)
+        // ImageIO capture-time downscale: clamp the longest side without ever
+        // shelling out to `screencapture`/`sips` or CPU-resampling ourselves.
+        var props: [CFString: Any] = [:]
+        if let cap = maxPixelSize {
+            props[kCGImageDestinationImageMaxPixelSize] = cap
+        }
+        CGImageDestinationAddImage(dest, cgImage, props.isEmpty ? nil : props as CFDictionary)
         guard CGImageDestinationFinalize(dest) else { return "" }
         return (data as Data).base64EncodedString()
     }
@@ -73,19 +88,56 @@ extension KitCaptureProvider {
         // Backing-resolution sizing via the pure Core math (invalid size => skip).
         let frame = target.frame
         let scale = backingScale(for: frame)
-        if let size = CaptureSizing.outputPixelSize(
+        guard let backingSize = CaptureSizing.outputPixelSize(
             windowSize: Size(w: Double(frame.width), h: Double(frame.height)),
             scale: scale
-        ) {
-            config.width = size.width
-            config.height = size.height
-        } else {
+        ) else {
             return nil // invalid (<=0) window size
         }
+        // GPU capture-time downscale: clamp the longest side at the source so the
+        // window server rasterizes straight to transport size (scalesToFit keeps
+        // aspect). The ImageIO maxPixelSize below is a second guard at encode.
+        let scaled = CaptureDownscale.scaledSize(
+            width: backingSize.width, height: backingSize.height
+        )
+        config.width = scaled.width
+        config.height = scaled.height
+        config.scalesToFit = true
         config.showsCursor = includeCursor // Inv 13: false on the primary path
         guard let cg = captureImageSync(filter: filter, config: config),
               cg.width > 0, cg.height > 0 else { return nil }
-        return KitCapturedImage(cg)
+        let maxPixel = CaptureDownscale.maxPixelSize(
+            width: cg.width, height: cg.height
+        )
+        let metadata = CaptureMetadata(
+            producedWidth: cg.width,
+            producedHeight: cg.height,
+            backingScale: scale,
+            cropOrigin: Point(x: Double(frame.origin.x), y: Double(frame.origin.y)),
+            windowId: windowId,
+            windowTitle: target.title,
+            displayId: displayId(for: frame)
+        )
+        return KitCapturedImage(cg, maxPixelSize: maxPixel, metadata: metadata)
+    }
+
+    /// CGDirectDisplayID of the screen the window is mostly on (B4 metadata).
+    private func displayId(for frame: CGRect) -> Int? {
+        var best: Int? = nil
+        var bestArea: CGFloat = 0
+        for screen in NSScreen.screens {
+            let inter = screen.frame.intersection(frame)
+            guard !inter.isNull else { continue }
+            let area = inter.width * inter.height
+            if area > bestArea,
+               let num = screen.deviceDescription[
+                   NSDeviceDescriptionKey("NSScreenNumber")
+               ] as? NSNumber {
+                bestArea = area
+                best = num.intValue
+            }
+        }
+        return best
     }
 
     // MARK: - SCK helpers (synchronous wrappers around the async API)
