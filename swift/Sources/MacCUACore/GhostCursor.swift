@@ -100,6 +100,78 @@ public enum GhostCursorGeometry {
     }
 }
 
+// ---------------------------------------------------------------------------
+// US-052 — Ghost cursor window tracking (§7.2)
+// ---------------------------------------------------------------------------
+//
+// The decorative ghost must FOLLOW its driven window: when the user (or the
+// agent) moves/resizes the window the sprite tracks it; when the window is
+// minimized, closed, sent to another Space, or otherwise off-screen the ghost
+// hides; and when the window moves across displays the panel repositions. The
+// OS sampling (CGWindowList polling on the run-loop thread) lives in the Kit
+// `KitGhostWindowTracker`; the *decision* — given the latest sample for one
+// window, what should the overlay do — is this pure, Linux-tested state machine.
+//
+// It deliberately emits an action ONLY on change (edge-triggered) so the overlay
+// is not spammed with redundant frame/hide calls every poll tick.
+
+/// A single poll observation of a tracked window. `bounds` is the window's
+/// CG-global rect (top-left origin); `isOnscreen` mirrors `kCGWindowIsOnscreen`
+/// (false when minimized or on another Space). Absence from the window list
+/// entirely (closed / minimized off the all-windows list) is modelled as a `nil`
+/// sample passed to `update`.
+public struct GhostWindowSample: Equatable, Sendable {
+    public let bounds: Rect
+    public let isOnscreen: Bool
+    public init(bounds: Rect, isOnscreen: Bool) {
+        self.bounds = bounds
+        self.isOnscreen = isOnscreen
+    }
+}
+
+/// The edge-triggered decision for one window's ghost on a single poll.
+public enum GhostTrackAction: Equatable, Sendable {
+    /// No change since the last emitted action — overlay untouched.
+    case none
+    /// Window is visible at a new frame (moved/resized/changed display) → the
+    /// overlay should follow to this CG-global rect.
+    case follow(Rect)
+    /// Window is gone/minimized/off-Space/off-screen → the overlay should hide
+    /// (keep the entry; a later `follow` re-shows it).
+    case hide
+}
+
+/// Pure per-window follow/hide state machine. One instance per tracked window.
+/// `update(nil)` (window absent from the list) and `update(offscreen)` both
+/// resolve to a single `.hide`; a visible sample with a new frame resolves to
+/// `.follow`. Repeated identical samples resolve to `.none`.
+public struct GhostWindowTrackingState: Sendable {
+    private var lastFrame: Rect?
+    private var hidden = false
+
+    public init() {}
+
+    public mutating func update(_ sample: GhostWindowSample?) -> GhostTrackAction {
+        guard let sample, sample.isOnscreen else {
+            if hidden { return .none }
+            hidden = true
+            return .hide
+        }
+        if hidden || lastFrame != sample.bounds {
+            hidden = false
+            lastFrame = sample.bounds
+            return .follow(sample.bounds)
+        }
+        return .none
+    }
+
+    /// Reset to the initial state (tracker stop / window re-registered).
+    public mutating func reset() {
+        lastFrame = nil
+        hidden = false
+    }
+}
+
 /// Pure per-window ghost-cursor registry: assigns a rotating tint per window,
 /// tracks each window's screen frame, and clamps every move to that frame so a
 /// ghost can never paint over another app (§7.2). Linux-testable with a fake (or
@@ -153,6 +225,21 @@ public final class GhostCursorController: GhostCursorDriving {
     public func move(windowId: Int, to point: Point, animated: Bool = false) {
         let clamped = frames[windowId].map { GhostCursorController.clampPointToWindow(point, $0) } ?? point
         overlay?.move(windowId: windowId, to: clamped, animated: animated)
+    }
+
+    /// Apply an edge-triggered `GhostWindowTrackingState` action to the overlay
+    /// (the Kit window-tracker chokepoint). `.follow` repositions, `.hide` orders
+    /// the ghost out (keeping its tint), `.none` is a no-op.
+    public func apply(_ action: GhostTrackAction, windowId: Int) {
+        switch action {
+        case .none:
+            break
+        case .follow(let frame):
+            windowMoved(windowId: windowId, frame: frame)
+        case .hide:
+            // Keep the assigned tint + last frame; just hide the sprite.
+            overlay?.hide(windowId: windowId)
+        }
     }
 
     /// Update a tracked window's screen frame (window moved/resized; nil = hide).

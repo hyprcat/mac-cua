@@ -173,6 +173,101 @@ final class GhostCursorTests: XCTestCase {
         XCTAssertEqual(DeliveryPath.classify(message: "Scrolled element 2 down (1 page(s))"), .wheel)
     }
 
+    // MARK: GhostWindowTrackingState (pure, US-052)
+
+    func testTrackFirstVisibleSampleFollows() {
+        var st = GhostWindowTrackingState()
+        let f = Rect(x: 10, y: 20, w: 300, h: 200)
+        XCTAssertEqual(st.update(GhostWindowSample(bounds: f, isOnscreen: true)), .follow(f))
+    }
+
+    func testTrackUnchangedFrameIsNone() {
+        var st = GhostWindowTrackingState()
+        let f = Rect(x: 10, y: 20, w: 300, h: 200)
+        _ = st.update(GhostWindowSample(bounds: f, isOnscreen: true))
+        XCTAssertEqual(st.update(GhostWindowSample(bounds: f, isOnscreen: true)), .none)
+    }
+
+    func testTrackMovedOrResizedFollows() {
+        var st = GhostWindowTrackingState()
+        let f1 = Rect(x: 10, y: 20, w: 300, h: 200)
+        let f2 = Rect(x: 500, y: 20, w: 300, h: 200) // moved (e.g. to another display)
+        _ = st.update(GhostWindowSample(bounds: f1, isOnscreen: true))
+        XCTAssertEqual(st.update(GhostWindowSample(bounds: f2, isOnscreen: true)), .follow(f2))
+        let f3 = Rect(x: 500, y: 20, w: 400, h: 250) // resized
+        XCTAssertEqual(st.update(GhostWindowSample(bounds: f3, isOnscreen: true)), .follow(f3))
+    }
+
+    func testTrackOffscreenHidesOnce() {
+        var st = GhostWindowTrackingState()
+        let f = Rect(x: 10, y: 20, w: 300, h: 200)
+        _ = st.update(GhostWindowSample(bounds: f, isOnscreen: true))
+        XCTAssertEqual(st.update(GhostWindowSample(bounds: f, isOnscreen: false)), .hide)
+        // Still off-screen → no repeat hide.
+        XCTAssertEqual(st.update(GhostWindowSample(bounds: f, isOnscreen: false)), .none)
+    }
+
+    func testTrackAbsentSampleHides() {
+        var st = GhostWindowTrackingState()
+        let f = Rect(x: 10, y: 20, w: 300, h: 200)
+        _ = st.update(GhostWindowSample(bounds: f, isOnscreen: true))
+        XCTAssertEqual(st.update(nil), .hide)        // minimized / closed
+        XCTAssertEqual(st.update(nil), .none)
+    }
+
+    func testTrackReappearFollows() {
+        var st = GhostWindowTrackingState()
+        let f = Rect(x: 10, y: 20, w: 300, h: 200)
+        _ = st.update(GhostWindowSample(bounds: f, isOnscreen: true))
+        _ = st.update(nil)                            // hidden
+        // Reappears at the same frame → must follow (re-show), not stay none.
+        XCTAssertEqual(st.update(GhostWindowSample(bounds: f, isOnscreen: true)), .follow(f))
+    }
+
+    func testTrackInitiallyAbsentHidesOnce() {
+        var st = GhostWindowTrackingState()
+        XCTAssertEqual(st.update(nil), .hide)
+        XCTAssertEqual(st.update(nil), .none)
+    }
+
+    func testTrackResetReplaysFollow() {
+        var st = GhostWindowTrackingState()
+        let f = Rect(x: 10, y: 20, w: 300, h: 200)
+        _ = st.update(GhostWindowSample(bounds: f, isOnscreen: true))
+        st.reset()
+        XCTAssertEqual(st.update(GhostWindowSample(bounds: f, isOnscreen: true)), .follow(f))
+    }
+
+    // MARK: controller.apply drives the overlay (US-052)
+
+    func testApplyFollowSetsWindowFrame() {
+        let overlay = FakeGhostOverlay()
+        let c = GhostCursorController(overlay: overlay)
+        c.startTracking(windowId: 7)
+        let f = Rect(x: 5, y: 5, w: 100, h: 100)
+        c.apply(.follow(f), windowId: 7)
+        XCTAssertEqual(overlay.framed[7], f)
+    }
+
+    func testApplyHideHidesWithoutForgettingTint() {
+        let overlay = FakeGhostOverlay()
+        let c = GhostCursorController(overlay: overlay)
+        let tint = c.startTracking(windowId: 7)
+        c.apply(.hide, windowId: 7)
+        XCTAssertEqual(overlay.hidden, [7])
+        // Tint preserved across hide so a re-show keeps the session's color.
+        XCTAssertEqual(c.style(forWindowId: 7), tint)
+    }
+
+    func testApplyNoneDoesNothing() {
+        let overlay = FakeGhostOverlay()
+        let c = GhostCursorController(overlay: overlay)
+        c.startTracking(windowId: 7)
+        c.apply(.none, windowId: 7)
+        XCTAssertTrue(overlay.hidden.isEmpty)
+        XCTAssertTrue(overlay.framed.isEmpty)
+    }
+
     // MARK: GhostCursorGeometry (pure, US-051)
 
     func testAppKitFrameFlipsYAgainstPrimaryHeight() {
