@@ -426,22 +426,33 @@ public final class KitInputProvider: InputProvider {
         windowId: Int?, source: EventSource?
     ) throws {
         let src = resolveSource(source)
-        let (dy, dx) = InputCoords.pixelScrollDeltas(direction: direction, pixels: pixels)
+        // Pure field plan (US-035): sets EVERY delta axis so both Chromium
+        // (point delta) and native Cocoa (fixedPt) scroll, plus coarse line
+        // clicks for discrete-wheel apps — never integer-only (Inv 6 / M4).
+        let f = InputCoords.pixelScrollFields(direction: direction, pixels: pixels)
         guard let scroll = CGEvent(
             scrollWheelEvent2Source: src, units: .pixel, wheelCount: 2,
-            wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0) else {
+            wheel1: Int32(f.pointDy), wheel2: Int32(f.pointDx), wheel3: 0) else {
             throw AutomationError.cgEvent("CGEvent(scrollWheelEvent2Source:) returned NULL")
         }
+        // Mark as a continuous (pixel) scroll.
+        scroll.setIntegerValueField(
+            Self.field(CGEventFieldNumber.scrollWheelEventIsContinuous), value: Int64(f.isContinuous))
+        // Line-click deltas — read by native Cocoa apps that only honor discrete wheel clicks.
+        scroll.setIntegerValueField(
+            Self.field(CGEventFieldNumber.scrollWheelEventDeltaAxis1), value: Int64(f.lineDy))
+        scroll.setIntegerValueField(
+            Self.field(CGEventFieldNumber.scrollWheelEventDeltaAxis2), value: Int64(f.lineDx))
         // Integer point deltas — read by Chromium-based apps.
         scroll.setIntegerValueField(
-            Self.field(CGEventFieldNumber.scrollWheelEventPointDeltaAxis1), value: Int64(dy))
+            Self.field(CGEventFieldNumber.scrollWheelEventPointDeltaAxis1), value: Int64(f.pointDy))
         scroll.setIntegerValueField(
-            Self.field(CGEventFieldNumber.scrollWheelEventPointDeltaAxis2), value: Int64(dx))
+            Self.field(CGEventFieldNumber.scrollWheelEventPointDeltaAxis2), value: Int64(f.pointDx))
         // Fixed-point deltas — read by native Cocoa apps.
         scroll.setDoubleValueField(
-            Self.field(CGEventFieldNumber.scrollWheelEventFixedPtDeltaAxis1), value: Double(dy))
+            Self.field(CGEventFieldNumber.scrollWheelEventFixedPtDeltaAxis1), value: f.fixedDy)
         scroll.setDoubleValueField(
-            Self.field(CGEventFieldNumber.scrollWheelEventFixedPtDeltaAxis2), value: Double(dx))
+            Self.field(CGEventFieldNumber.scrollWheelEventFixedPtDeltaAxis2), value: f.fixedDx)
         scroll.postToPid(pid_t(pid))
     }
 }

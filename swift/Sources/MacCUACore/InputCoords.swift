@@ -109,6 +109,40 @@ public enum InputCoords {
     public static let lineDelta = 5
     public static let scrollPixelQuantum = 80
 
+    /// The complete set of scroll-wheel field values for a single pixel-precise
+    /// scroll event (US-035, Inv 6). A pixel scroll sets EVERY delta family so
+    /// both Chromium/Electron (read integer `pointDelta`) and native Cocoa (read
+    /// `fixedPtDelta`) move, plus coarse `lineDelta` clicks so apps that only read
+    /// discrete wheel deltas still scroll — never integer-only (the macos-cua M4
+    /// regression). `isContinuous == 1` flags it as a smooth/pixel scroll.
+    public struct PixelScrollFields: Equatable, Sendable {
+        public let lineDy: Int
+        public let lineDx: Int
+        public let pointDy: Int
+        public let pointDx: Int
+        public let fixedDy: Double
+        public let fixedDx: Double
+        public let isContinuous: Int
+    }
+
+    /// Pure field plan for `scrollPidPixel`. The line-click magnitude is the pixel
+    /// span quantized by `scrollPixelQuantum` (80px ≈ one wheel click), floored at
+    /// one click in the scroll direction.
+    public static func pixelScrollFields(direction: String, pixels: Int) -> PixelScrollFields {
+        let (pdy, pdx) = pixelScrollDeltas(direction: direction, pixels: pixels)
+        let clicks = max(1, abs(pixels) / scrollPixelQuantum)
+        let (ldy, ldx) = lineScrollDeltas(direction: direction)
+        // Scale the unit line delta (±lineDelta) by the wheel-click count while
+        // preserving its sign; a zero unit delta (bogus direction) stays zero.
+        let lineDy = ldy == 0 ? 0 : (ldy / lineDelta) * lineDelta * clicks
+        let lineDx = ldx == 0 ? 0 : (ldx / lineDelta) * lineDelta * clicks
+        return PixelScrollFields(
+            lineDy: lineDy, lineDx: lineDx,
+            pointDy: pdy, pointDx: pdx,
+            fixedDy: Double(pdy), fixedDx: Double(pdx),
+            isContinuous: 1)
+    }
+
     /// Map a single-key name to the literal character to type, or nil when it is
     /// not a plain text key (a combo, or a named key that `parseKeyCombo` should
     /// resolve to a keycode). Ports `input.py::_coerce_text_key`.
