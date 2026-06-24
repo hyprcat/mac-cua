@@ -55,6 +55,9 @@ public struct FeatureFlags: Equatable, Sendable {
     public var advancedPruning: Bool
     public var allowForbiddenTargets: Bool
     public var confirmedDelivery: Bool
+    /// Vision OCR fallback for tree-less surfaces (A2, US-046). Off by default —
+    /// OCR is opt-in and strictly gated to near-empty/AX-unavailable surfaces.
+    public var ocrFallback: Bool
 
     public init(
         alwaysSimulateClick: Bool = false,
@@ -76,7 +79,8 @@ public struct FeatureFlags: Equatable, Sendable {
         personalInstructionsOverridesBuiltin: Bool = false,
         advancedPruning: Bool = true,
         allowForbiddenTargets: Bool = false,
-        confirmedDelivery: Bool = true
+        confirmedDelivery: Bool = true,
+        ocrFallback: Bool = false
     ) {
         self.alwaysSimulateClick = alwaysSimulateClick
         self.screenshotClassifier = screenshotClassifier
@@ -98,6 +102,7 @@ public struct FeatureFlags: Equatable, Sendable {
         self.advancedPruning = advancedPruning
         self.allowForbiddenTargets = allowForbiddenTargets
         self.confirmedDelivery = confirmedDelivery
+        self.ocrFallback = ocrFallback
     }
 
     /// All flag snake_case (config + env) names, in `dataclasses.fields(cls)` order.
@@ -123,6 +128,7 @@ public struct FeatureFlags: Equatable, Sendable {
         "advanced_pruning",
         "allow_forbidden_targets",
         "confirmed_delivery",
+        "ocr_fallback",
     ]
 
     /// Read a flag by its snake_case name. Returns nil for unknown names.
@@ -148,6 +154,7 @@ public struct FeatureFlags: Equatable, Sendable {
         case "advanced_pruning": return advancedPruning
         case "allow_forbidden_targets": return allowForbiddenTargets
         case "confirmed_delivery": return confirmedDelivery
+        case "ocr_fallback": return ocrFallback
         default: return nil
         }
     }
@@ -175,6 +182,7 @@ public struct FeatureFlags: Equatable, Sendable {
         case "advanced_pruning": advancedPruning = value
         case "allow_forbidden_targets": allowForbiddenTargets = value
         case "confirmed_delivery": confirmedDelivery = value
+        case "ocr_fallback": ocrFallback = value
         default: break
         }
     }

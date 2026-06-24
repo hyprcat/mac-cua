@@ -642,7 +642,7 @@
         "Linux gate green (merge logic fake-tested)"
       ],
       "priority": 47,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

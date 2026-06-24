@@ -866,9 +866,22 @@ extension SessionManager {
             activeGraph = graph
         }
 
+        // Step 6b: Vision OCR fallback (A2, US-046) — ONLY for genuinely tree-less
+        // surfaces. Merged into the model-facing display list, but NOT into the
+        // graph / RefetchableTree (OCR nodes have no axRef). A normal AX app never
+        // reaches the provider call (gated by `shouldRunOCR`).
+        var displayNodes = nodes
+        if flags.ocrFallback, let ocr = providers.ocr, let image = img,
+            OCRFallback.shouldRunOCR(nodeCount: nodes.count, axAvailable: !nodes.isEmpty) {
+            let observations = ocr.recognizeText(in: image)
+            if !observations.isEmpty {
+                displayNodes = OCRFallback.merge(existing: nodes, ocr: observations)
+            }
+        }
+
         // Step 6 serialize (pruning already applied → enable_pruning=false).
         let treeText = serialize(
-            nodes, focusedIndex: focused, enablePruning: false, codexStyle: flags.codexTreeStyle)
+            displayNodes, focusedIndex: focused, enablePruning: false, codexStyle: flags.codexTreeStyle)
 
         // Step 7: header.
         let header = makeHeader(
@@ -879,7 +892,7 @@ extension SessionManager {
 
         // Steps 8-9: snapshot id + store nodes for index resolution.
         session.snapshotId += 1
-        session.treeNodes = nodes
+        session.treeNodes = displayNodes
 
         // Step 9b: wire RefetchableTree.
         wireRefetchableTree(session, nodes: nodes, rootRef: rootRef, activeGraph: activeGraph, t: t)
@@ -890,7 +903,7 @@ extension SessionManager {
             snapshotId: session.snapshotId,
             windowTitle: windowTitle,
             treeText: "\(header)\n\n\(treeText)",
-            treeNodes: nodes,
+            treeNodes: displayNodes,
             focusedElement: focused,
             screenshot: img?.pngBase64(),
             appState: appState,

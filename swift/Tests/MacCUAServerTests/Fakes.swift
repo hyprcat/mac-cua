@@ -254,6 +254,24 @@ final class FakeCapture: CaptureProvider {
     func promptScreenRecordingPermission() -> Bool { screenRecordingGranted }
 }
 
+// MARK: - OCR (US-046)
+
+final class FakeOCR: OCRProvider {
+    /// Observations returned by `recognizeText`.
+    var observations: [OCRObservation] = []
+    /// Records every call so a test can assert OCR was (or was NOT) invoked.
+    private(set) var recognizeCalls = 0
+
+    init(observations: [OCRObservation] = []) {
+        self.observations = observations
+    }
+
+    func recognizeText(in image: CapturedImage) -> [OCRObservation] {
+        recognizeCalls += 1
+        return observations
+    }
+}
+
 // MARK: - Selection / settle / outcome / focus
 
 final class FakeSelection: SelectionProvider {
@@ -386,6 +404,7 @@ func makeFakeProviders(
     input: FakeInput = FakeInput(),
     capture: FakeCapture = FakeCapture(),
     clipboard: FakeClipboard = FakeClipboard(),
+    ocr: OCRProvider? = nil,
     frontmost: FakeFrontmostTracking = FakeFrontmostTracking(),
     userInteraction: FakeUserInteraction = FakeUserInteraction(),
     makeSettleMonitor: @escaping (AppSession) -> SettleMonitor = { _ in FakeSettleMonitor() },
@@ -398,6 +417,7 @@ func makeFakeProviders(
         input: input,
         capture: capture,
         clipboard: clipboard,
+        ocr: ocr,
         frontmostTracker: frontmost,
         userInteractionMonitor: userInteraction,
         makeSettleMonitor: makeSettleMonitor,

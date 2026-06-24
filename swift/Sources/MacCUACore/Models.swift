@@ -77,6 +77,10 @@ public final class Node {
     // Web content flags
     public var isWebArea: Bool
     public var isOop: Bool
+    /// Provenance marker for synthetic nodes (e.g. `"ocr"` for Vision OCR-fallback
+    /// nodes, US-046). `nil` for real AX nodes. Internal-only steering field; the
+    /// raw value is never serialized into the model packet.
+    public var source: String?
     // Original AX role for pruning decisions
     public var axRole: String?
     public var subrole: String?
@@ -116,6 +120,7 @@ public final class Node {
         lmDescription: String? = nil,
         isWebArea: Bool = false,
         isOop: Bool = false,
+        source: String? = nil,
         axRole: String? = nil,
         subrole: String? = nil,
         elementPid: Int? = nil,
@@ -149,6 +154,7 @@ public final class Node {
         self.lmDescription = lmDescription
         self.isWebArea = isWebArea
         self.isOop = isOop
+        self.source = source
         self.axRole = axRole
         self.subrole = subrole
         self.elementPid = elementPid

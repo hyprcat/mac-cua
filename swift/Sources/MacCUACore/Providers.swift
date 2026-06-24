@@ -388,6 +388,19 @@ public protocol ClipboardProvider: AnyObject {
     func clear() throws
 }
 
+// MARK: - OCRProvider (Vision OCR fallback, A2 / US-046)
+
+/// Vision OCR over an already-captured window image. Used ONLY for genuinely
+/// tree-less surfaces (canvas/PDF/image windows) — the spine gates this strictly
+/// via `OCRFallback.shouldRunOCR`, so a normal AX app never triggers OCR. The Kit
+/// impl runs `VNRecognizeTextRequest(.accurate)`. Read-only over an image already
+/// in hand — never foregrounds/activates/captures fresh (Invariant 13).
+public protocol OCRProvider: AnyObject {
+    /// Recognized text runs in captured-image PIXEL space (top-left origin), or
+    /// `[]` when nothing is recognized / OCR is unavailable.
+    func recognizeText(in image: CapturedImage) -> [OCRObservation]
+}
+
 // MARK: - SettleMonitor (observer.py, §5.3 polling design)
 
 /// Event-driven settle by OBSERVATION, not AX notifications (§5.3): poll a cheap

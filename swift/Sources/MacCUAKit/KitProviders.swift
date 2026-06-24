@@ -28,6 +28,7 @@ public func makeKitProviders() -> Providers {
         input: KitInputProvider(skyLight: skyLight),
         capture: KitCaptureProvider(),
         clipboard: KitClipboardProvider(),
+        ocr: KitOCRProvider(),
         frontmostTracker: KitFrontmostTracker(),
         userInteractionMonitor: KitUserInteractionMonitor(),
         makeSettleMonitor: { _ in KitSettleMonitor() },
