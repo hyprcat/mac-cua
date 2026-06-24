@@ -37,6 +37,59 @@ public enum SkyLightSymbol: String, CaseIterable, Sendable {
     case CGEventPostToPSN               // void (ProcessSerialNumber *psn, CGEventRef e)
 }
 
+/// macOS-26 SPI-removal resilience contract (C8, §5.7).
+///
+/// Tahoe (macOS 26) deleted a family of CoreGraphics-Server / SkyLight private
+/// symbols. The Prime-Invariant rule for this port (Invariant 17/18): a removed
+/// symbol must NEVER become a hard link dependency, a crash, or a foregrounding
+/// trigger — it is only ever an OPTIONAL optimization, and its absence degrades
+/// to the always-available `CGEvent.postToPid` base path (US-028) or to
+/// assume-valid window-owner validation (US-029b).
+///
+/// Two classes of removed symbol:
+///   1. Symbols still in our catalogue but optional — `CGSGetConnectionIDForPID`
+///      (pre-26 window-owner Strategy 1; superseded by `CGSConnectionGetPID`
+///      Strategy 2). Resolved individually; `nil` when absent.
+///   2. Symbols we DELIBERATELY NEVER reference — the legacy
+///      `CGSPostKeyboardEventToProcess` / `CGSPostMouseEventToProcess` /
+///      `CGSPostEventRecordToProcess`. They are not in `SkyLightSymbol` at all,
+///      so they can never be a dependency by construction; the targeted
+///      `SLEventPostToPid` family replaces them as an optimization only.
+public enum SkyLightResilience {
+    /// Catalogued symbols that macOS 26 removed (class 1 above). Each must stay
+    /// out of every "required" set — verified by `removedSymbolsAreNeverRequired`.
+    public static let removedInMacOS26: Set<SkyLightSymbol> = [.CGSGetConnectionIDForPID]
+
+    /// Legacy per-process post SPIs we never bind (class 2 above). EXACT C names,
+    /// kept here only to assert (in tests/docs) that they are absent from the
+    /// catalogue and thus impossible to depend on.
+    public static let neverReferencedRemovedSPIs: Set<String> = [
+        "CGSPostKeyboardEventToProcess",
+        "CGSPostMouseEventToProcess",
+        "CGSPostEventRecordToProcess",
+    ]
+
+    /// The SkyLight symbols required by EACH capability. CGEvent base delivery is
+    /// intentionally absent from this map: it requires NO SkyLight symbol, which
+    /// is exactly why it is the always-available primary.
+    public static let requiredSymbols: [String: Set<SkyLightSymbol>] = [
+        "isAvailable": SkyLightCapabilities.requiredForAvailable,
+        "canValidateWindowOwner": SkyLightCapabilities.requiredForWindowOwner,
+        "canDeliverMouse": SkyLightCapabilities.requiredForMouse,
+        "canDeliverKeyboard": SkyLightCapabilities.requiredForKeyboard,
+    ]
+
+    /// True iff no macOS-26-removed symbol gates any capability (the C8 invariant).
+    /// A removed symbol appearing in any required set would make that capability a
+    /// hard dependency on a deleted SPI — forbidden.
+    public static var removedSymbolsAreNeverRequired: Bool {
+        for required in requiredSymbols.values where !required.isDisjoint(with: removedInMacOS26) {
+            return false
+        }
+        return true
+    }
+}
+
 /// Injectable resolver seam. Kit implements this with dlopen+dlsym; tests inject
 /// a fake that "resolves" a fixed set of symbols. Returning a non-nil opaque
 /// pointer means the symbol is present; `nil` means absent (fall through).
@@ -60,38 +113,55 @@ public struct SkyLightCapabilities: Sendable, Equatable {
         self.mainConnectionId = mainConnectionId
     }
 
+    // The per-capability required-symbol sets are exposed as named constants (not
+    // inline literals) so the macOS-26 resilience guard can verify NO removed
+    // symbol gates any capability. `requiredForAvailable` holds only the base
+    // symbol; the non-zero-connection check is a runtime fact, not a symbol.
+
+    /// Base symbol behind `isAvailable` (paired with a non-zero connection id).
+    public static let requiredForAvailable: Set<SkyLightSymbol> = [.CGSMainConnectionID]
+
+    /// Window-owner validation (US-029b) — owner lookup on top of availability.
+    public static let requiredForWindowOwner: Set<SkyLightSymbol> = [.SLSGetWindowOwner]
+
+    /// Targeted MOUSE delivery (C2/US-030).
+    public static let requiredForMouse: Set<SkyLightSymbol> = [
+        .SLEventPostToPid, .SLEventSetIntegerValueField, .CGEventSetWindowLocation,
+    ]
+
+    /// Targeted KEYBOARD delivery (C3/US-031). The ObjC
+    /// `SLSEventAuthenticationMessage` class is resolved separately via the ObjC
+    /// runtime in Kit, not through this dlsym set.
+    public static let requiredForKeyboard: Set<SkyLightSymbol> = [
+        .SLEventPostToPid, .SLEventSetAuthenticationMessage,
+        .CGEventPostToPSN, .SLSGetWindowOwner, .SLSGetConnectionPSN,
+    ]
+
     /// Port of `skylight.is_available()`: framework loaded (we could resolve and
     /// call `CGSMainConnectionID`) AND the main connection is non-zero. Dynamic —
     /// recomputed from the live capabilities each time so it stays test-patchable.
     public var isAvailable: Bool {
-        resolved.contains(.CGSMainConnectionID) && mainConnectionId != 0
+        resolved.isSuperset(of: Self.requiredForAvailable) && mainConnectionId != 0
     }
 
     /// Window-owner validation (US-029b) needs the owner lookup. Connection→PID /
     /// connection-compare strategies are layered on top by the validator.
     public var canValidateWindowOwner: Bool {
-        isAvailable && resolved.contains(.SLSGetWindowOwner)
+        isAvailable && resolved.isSuperset(of: Self.requiredForWindowOwner)
     }
 
     /// Targeted MOUSE delivery (C2/US-030): post to a pid, stamp the target
     /// window id into the integer fields, and place the event in window-local
     /// coordinates.
     public var canDeliverMouse: Bool {
-        isAvailable && resolved.isSuperset(of: [
-            .SLEventPostToPid, .SLEventSetIntegerValueField, .CGEventSetWindowLocation,
-        ])
+        isAvailable && resolved.isSuperset(of: Self.requiredForMouse)
     }
 
     /// Targeted KEYBOARD delivery (C3/US-031): authenticated SkyLight post to the
     /// pid PLUS a `CGEventPostToPSN` to the window owner resolved via
-    /// `SLSGetWindowOwner` → `SLSGetConnectionPSN`. (The ObjC
-    /// `SLSEventAuthenticationMessage` class is resolved separately via the ObjC
-    /// runtime in Kit, not through this dlsym set.)
+    /// `SLSGetWindowOwner` → `SLSGetConnectionPSN`.
     public var canDeliverKeyboard: Bool {
-        isAvailable && resolved.isSuperset(of: [
-            .SLEventPostToPid, .SLEventSetAuthenticationMessage,
-            .CGEventPostToPSN, .SLSGetWindowOwner, .SLSGetConnectionPSN,
-        ])
+        isAvailable && resolved.isSuperset(of: Self.requiredForKeyboard)
     }
 }
 
