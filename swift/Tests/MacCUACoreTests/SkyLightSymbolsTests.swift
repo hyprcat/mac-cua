@@ -29,7 +29,8 @@ final class SkyLightSymbolsTests: XCTestCase {
         XCTAssertEqual(SkyLightSymbol.SLEventSetAuthenticationMessage.rawValue, "SLEventSetAuthenticationMessage")
         XCTAssertEqual(SkyLightSymbol.CGEventSetWindowLocation.rawValue, "CGEventSetWindowLocation")
         XCTAssertEqual(SkyLightSymbol.CGEventPostToPSN.rawValue, "CGEventPostToPSN")
-        XCTAssertEqual(SkyLightSymbol.allCases.count, 9)
+        XCTAssertEqual(SkyLightSymbol.CGSGetConnectionIDForPID.rawValue, "CGSGetConnectionIDForPID")
+        XCTAssertEqual(SkyLightSymbol.allCases.count, 10)
     }
 
     func testResolvedSetReflectsLoader() {

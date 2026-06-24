@@ -32,6 +32,7 @@ typedef uint32_t (*CSky_CGSMainConnectionID)(void);
 typedef int32_t  (*CSky_SLSGetWindowOwner)(uint32_t cid, uint32_t wid, uint32_t *ownerCidOut);
 typedef int32_t  (*CSky_SLSGetConnectionPSN)(uint32_t cid, ProcessSerialNumber *psnOut);
 typedef int32_t  (*CSky_CGSConnectionGetPID)(uint32_t cid, int32_t *pidOut);
+typedef int32_t  (*CSky_CGSGetConnectionIDForPID)(uint32_t cid, int32_t pid, uint32_t *cidOut); // pre-26 owner strategy; REMOVED in macOS 26
 
 // --- Targeted-delivery symbols ----------------------------------------------
 typedef void (*CSky_SLEventPostToPid)(int32_t pid, CGEventRef event);

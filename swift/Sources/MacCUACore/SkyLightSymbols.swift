@@ -28,6 +28,7 @@ public enum SkyLightSymbol: String, CaseIterable, Sendable {
     case SLSGetWindowOwner              // int32_t (cid, wid, uint32_t *ownerCidOut)
     case SLSGetConnectionPSN            // int32_t (cid, ProcessSerialNumber *psnOut)
     case CGSConnectionGetPID            // int32_t (cid, int32_t *pidOut)  — macOS 26+ reverse lookup
+    case CGSGetConnectionIDForPID       // int32_t (cid, pid, uint32_t *cidOut) — pre-26 owner strategy (removed in 26)
     // Targeted-delivery symbols.
     case SLEventPostToPid               // void (int32_t pid, CGEventRef e)
     case SLEventSetIntegerValueField    // void (CGEventRef e, uint32_t field, int64_t v) — field 40 = pid

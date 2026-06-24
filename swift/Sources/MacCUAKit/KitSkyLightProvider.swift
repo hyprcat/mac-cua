@@ -38,6 +38,7 @@ public final class KitSkyLightProvider: SkyLightProviding {
     let fnGetWindowOwner: CSky_SLSGetWindowOwner?
     let fnGetConnectionPSN: CSky_SLSGetConnectionPSN?
     let fnConnectionGetPID: CSky_CGSConnectionGetPID?
+    let fnGetConnectionIDForPID: CSky_CGSGetConnectionIDForPID?
     let fnEventPostToPid: CSky_SLEventPostToPid?
     let fnEventSetIntegerValueField: CSky_SLEventSetIntegerValueField?
     let fnEventSetAuthenticationMessage: CSky_SLEventSetAuthenticationMessage?
@@ -59,6 +60,7 @@ public final class KitSkyLightProvider: SkyLightProviding {
         self.fnGetWindowOwner = cast(.SLSGetWindowOwner, CSky_SLSGetWindowOwner.self)
         self.fnGetConnectionPSN = cast(.SLSGetConnectionPSN, CSky_SLSGetConnectionPSN.self)
         self.fnConnectionGetPID = cast(.CGSConnectionGetPID, CSky_CGSConnectionGetPID.self)
+        self.fnGetConnectionIDForPID = cast(.CGSGetConnectionIDForPID, CSky_CGSGetConnectionIDForPID.self)
         self.fnEventPostToPid = cast(.SLEventPostToPid, CSky_SLEventPostToPid.self)
         self.fnEventSetIntegerValueField = cast(.SLEventSetIntegerValueField, CSky_SLEventSetIntegerValueField.self)
         self.fnEventSetAuthenticationMessage = cast(.SLEventSetAuthenticationMessage, CSky_SLEventSetAuthenticationMessage.self)
@@ -84,6 +86,17 @@ public final class KitSkyLightProvider: SkyLightProviding {
 
     public var isAvailable: Bool { capabilities.isAvailable }
 
+    // MARK: - Window-owner validation (US-029b; Invariant 19)
+
+    /// Validate that `windowId` still belongs to `expectedPid`, deferring all
+    /// branch logic to the pure `WindowOwnerValidator` (Core). Returns `true` on a
+    /// match OR when validation cannot be performed (assume-valid) — never blocks.
+    public func validateWindowOwner(windowId: UInt32, expectedPid: Int32) -> Bool {
+        WindowOwnerValidator.validate(
+            windowId: windowId, expectedPid: expectedPid, lookups: self
+        )
+    }
+
     #if DEBUG
     /// For the MANUAL-VERIFY pass: which symbols resolved on this host.
     public func resolvedSymbolReport() -> [String: Bool] {
@@ -96,5 +109,35 @@ public final class KitSkyLightProvider: SkyLightProviding {
         return report
     }
     #endif
+}
+
+/// Live SkyLight-backed owner lookups. Each method calls the resolved private
+/// symbol and returns `nil` when the symbol is absent or the CGS call errored —
+/// exactly the "cannot perform → assume valid" signal the pure validator expects.
+extension KitSkyLightProvider: WindowOwnerLookups {
+    public func windowOwnerConnectionId(windowId: UInt32) -> UInt32? {
+        guard let fn = fnGetWindowOwner else { return nil }
+        let cid = mainConnectionId
+        guard cid != 0 else { return nil }
+        var ownerCid: UInt32 = 0
+        let err = fn(cid, windowId, &ownerCid)
+        return err == 0 ? ownerCid : nil
+    }
+
+    public func connectionId(forPid pid: Int32) -> UInt32? {
+        guard let fn = fnGetConnectionIDForPID else { return nil }  // removed in macOS 26
+        let cid = mainConnectionId
+        guard cid != 0 else { return nil }
+        var out: UInt32 = 0
+        let err = fn(cid, pid, &out)
+        return err == 0 ? out : nil
+    }
+
+    public func pid(forConnectionId connectionId: UInt32) -> Int32? {
+        guard let fn = fnConnectionGetPID else { return nil }
+        var out: Int32 = 0
+        let err = fn(connectionId, &out)
+        return err == 0 ? out : nil
+    }
 }
 #endif
