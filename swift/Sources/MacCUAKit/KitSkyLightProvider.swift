@@ -17,6 +17,7 @@
 import Foundation
 import AppKit
 import CoreGraphics
+import CoreServices
 import MacCUACore
 import CSkyLightShim
 import ObjectiveC.runtime
@@ -159,6 +160,99 @@ public final class KitSkyLightProvider: SkyLightProviding {
         }
         post(Int32(pid), event)
         return true
+    }
+
+    // MARK: - Targeted keyboard delivery (US-031; C3, Invariant 3)
+
+    /// Deliver a single authenticated keyboard event to a BACKGROUND window via
+    /// SkyLight — no foregrounding, no corruption of the user's live modifier
+    /// state.
+    ///
+    /// Modifiers ride as FLAGS on the key event (`CGEventSetFlags`) per the pure
+    /// `SkyLightKeyboardDelivery.cgEventFlags` plan; discrete `flagsChanged`
+    /// events are NEVER posted via `postToPid` (Invariant 3) — they would leak
+    /// into and corrupt the user's physical keyboard. The event is authenticated
+    /// with `+[SLSEventAuthenticationMessage messageWithEventRecord:pid:version:]`
+    /// → `SLEventSetAuthenticationMessage` and delivered on BOTH routes
+    /// (`SkyLightKeyboardDelivery.deliveryRoutes`): the authenticated
+    /// `SLEventPostToPid` to the target pid PLUS a secondary `CGEventPostToPSN`
+    /// to the window owner (PSN resolved via `SLSGetWindowOwner` →
+    /// `SLSGetConnectionPSN`).
+    ///
+    /// Returns `false` (caller falls through to the CGEvent base path, US-028)
+    /// when the SkyLight keyboard capability is unavailable or any step fails — it
+    /// NEVER foregrounds on failure (Invariant 18).
+    @discardableResult
+    public func deliverKeyboard(
+        pid: Int, windowId: Int, keycode: Int, keyDown: Bool, modifierMask: Int
+    ) -> Bool {
+        guard capabilities.canDeliverKeyboard,
+              let post = fnEventPostToPid,
+              let setAuth = fnEventSetAuthenticationMessage,
+              let postPSN = fnEventPostToPSN,
+              let getOwner = fnGetWindowOwner,
+              let getPSN = fnGetConnectionPSN,
+              let authClass = authMessageClass else { return false }
+
+        let cid = mainConnectionId
+        guard cid != 0 else { return false }
+
+        // Per-session private source (Invariant 4); flags = modifiers (Invariant 3).
+        guard let source = CGEventSource(
+                stateID: CGEventSourceStateID(rawValue: CGEventSourceStateIDValue.privateState)
+                    ?? .privateState),
+              let event = CGEvent(
+                keyboardEventSource: source,
+                virtualKey: CGKeyCode(keycode), keyDown: keyDown) else { return false }
+        event.flags = CGEventFlags(
+            rawValue: SkyLightKeyboardDelivery.cgEventFlags(modifierMask: modifierMask))
+
+        // Resolve the window owner's PSN: SLSGetWindowOwner -> SLSGetConnectionPSN.
+        var ownerCid: UInt32 = 0
+        guard getOwner(cid, UInt32(windowId), &ownerCid) == 0, ownerCid != 0 else { return false }
+        var psn = ProcessSerialNumber()
+        guard getPSN(ownerCid, &psn) == 0 else { return false }
+
+        // Authenticate the event for the target pid.
+        guard let message = Self.makeAuthMessage(authClass, event: event, pid: Int32(pid)) else {
+            return false
+        }
+        setAuth(event, Unmanaged.passUnretained(message).toOpaque())
+
+        // Route 1: authenticated SkyLight post to the target pid.
+        post(Int32(pid), event)
+        // Route 2: secondary CGEventPostToPSN to the resolved window owner.
+        postPSN(&psn, event)
+        return true
+    }
+
+    /// Version stamped into the authentication message. SkyLight's authenticated
+    /// event path uses a small event-record version; `1` is the observed value.
+    /// (Real-app value is part of the MANUAL-VERIFY pass for US-031.)
+    private static let authMessageVersion: Int32 = 1
+
+    /// Build the authentication object via
+    /// `+[SLSEventAuthenticationMessage messageWithEventRecord:pid:version:]`.
+    ///
+    /// The selector takes mixed C/object argument types, so we resolve the class
+    /// method's IMP and call it through a typed `@convention(c)` cast rather than
+    /// `perform(_:)`. The `eventRecord` argument is the CGEvent's record pointer
+    /// (passed as the CGEventRef's opaque pointer — Swift pulls it cleanly instead
+    /// of the TS byte-offset hack; the exact record decoding is part of the
+    /// MANUAL-VERIFY pass). Returns `nil` if the class does not respond.
+    private static func makeAuthMessage(
+        _ cls: AnyClass, event: CGEvent, pid: Int32
+    ) -> AnyObject? {
+        let sel = NSSelectorFromString("messageWithEventRecord:pid:version:")
+        guard let method = class_getClassMethod(cls, sel) else { return nil }
+        typealias AuthIMP = @convention(c) (
+            AnyObject, Selector, UnsafeRawPointer?, Int32, Int32
+        ) -> Unmanaged<AnyObject>?
+        let imp = method_getImplementation(method)
+        let fn = unsafeBitCast(imp, to: AuthIMP.self)
+        let record = Unmanaged.passUnretained(event).toOpaque()
+        let result = fn(cls, sel, record, pid, authMessageVersion)
+        return result?.takeUnretainedValue()
     }
 
     /// Map a `CGEventType` to the AppKit `NSEvent.EventType` that

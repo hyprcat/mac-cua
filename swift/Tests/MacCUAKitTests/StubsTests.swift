@@ -23,6 +23,17 @@ final class StubsTests: XCTestCase {
         XCTAssertTrue(true)
     }
 
+    func testSkyLightKeyboardDeliveryFailsClosedNonActivating() {
+        // US-031: delivering to a bogus window/pid must return false (owner PSN
+        // cannot resolve, or the capability is absent) — it falls through to the
+        // CGEvent base path and NEVER foregrounds (Invariant 18). Whatever the
+        // host's symbol surface, this must not crash and must not throw.
+        let sky = KitSkyLightProvider()
+        let delivered = sky.deliverKeyboard(
+            pid: -1, windowId: 0, keycode: 0, keyDown: true, modifierMask: 0)
+        XCTAssertFalse(delivered)
+    }
+
     func testNonActingStubDefaultsAreInert() {
         // Remaining stubs must not act (Prime Invariant): the trivial-return
         // bodies report "nothing happened", never foreground.
