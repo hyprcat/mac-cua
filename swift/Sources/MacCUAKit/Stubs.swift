@@ -100,14 +100,9 @@ public final class KitCaptureProvider: CaptureProvider {
 
 // MARK: - OutcomeMonitor — real impl in KitOutcomeMonitor.swift (US-037)
 
-// MARK: - Focus / interruption services (US-044/045)
+// MARK: - UserInteractionMonitor — real impl in KitUserInteractionMonitor.swift (US-044)
 
-public final class KitUserInteractionMonitor: UserInteractionMonitoring {
-    public init() {}
-    public func startMonitoring(pid: Int) {}
-    public func stopMonitoring() {}
-    public func checkInterruption(bundleId: String) -> String? { nil }
-}
+// MARK: - Focus / interruption services (US-045)
 
 public final class KitMenuTracker: MenuTracking {
     public init() {}
