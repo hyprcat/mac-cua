@@ -80,10 +80,32 @@ extension KitCaptureProvider {
     public func captureWindow(windowId: Int, includeCursor: Bool) throws -> CapturedImage? {
         guard #available(macOS 12.3, *) else { return nil }
         let pid = getWindowPid(windowId: windowId)
-        guard let target = shareableWindow(windowId: windowId, pid: pid) else {
-            return nil
+        // B2: reuse a cached SCContentFilter when the window's live signature still
+        // matches (window-replace guard); only re-resolve (the ~80–200 ms cold
+        // SCShareableContent discovery) on a miss.
+        let signature = currentSignature(windowId: windowId)
+        let cachedFilter: SCContentFilter? = signature.flatMap {
+            filterCache.value(forWindowId: windowId, signature: $0) as? SCContentFilter
         }
-        let filter = SCContentFilter(desktopIndependentWindow: target)
+        let target: SCWindow?
+        let filter: SCContentFilter
+        if let cachedFilter {
+            filter = cachedFilter
+            target = shareableWindow(windowId: windowId, pid: pid)
+        } else {
+            guard let resolved = shareableWindow(windowId: windowId, pid: pid) else {
+                // SCK shareable-content unavailable: try the private GPU fallback.
+                return privateFallbackImage(windowId: windowId, signature: signature)
+            }
+            target = resolved
+            filter = SCContentFilter(desktopIndependentWindow: resolved)
+            if let signature {
+                filterCache.store(filter, forWindowId: windowId, signature: signature)
+            }
+        }
+        // Sizing/metadata needs the live SCWindow frame; if we only had a cached
+        // filter and the window vanished, fail honestly.
+        guard let target else { return nil }
         let config = SCStreamConfiguration()
         // Backing-resolution sizing via the pure Core math (invalid size => skip).
         let frame = target.frame
@@ -105,7 +127,12 @@ extension KitCaptureProvider {
         config.scalesToFit = true
         config.showsCursor = includeCursor // Inv 13: false on the primary path
         guard let cg = captureImageSync(filter: filter, config: config),
-              cg.width > 0, cg.height > 0 else { return nil }
+              cg.width > 0, cg.height > 0 else {
+            // SCK capture returned nil: the filter may be stale (window replaced
+            // under a recycled id) — drop it and try the private GPU fallback.
+            filterCache.invalidate(windowId: windowId)
+            return privateFallbackImage(windowId: windowId, signature: signature)
+        }
         let maxPixel = CaptureDownscale.maxPixelSize(
             width: cg.width, height: cg.height
         )
@@ -116,6 +143,30 @@ extension KitCaptureProvider {
             cropOrigin: Point(x: Double(frame.origin.x), y: Double(frame.origin.y)),
             windowId: windowId,
             windowTitle: target.title,
+            displayId: displayId(for: frame)
+        )
+        return KitCapturedImage(cg, maxPixelSize: maxPixel, metadata: metadata)
+    }
+
+    /// B3 fallback wrapper: capture via the private one-shot SPI and wrap the
+    /// result with downscale + metadata. Returns nil when the SPI is unavailable
+    /// or yields nothing — caller fails honestly (never foregrounds).
+    private func privateFallbackImage(
+        windowId: Int, signature: CapturedWindowSignature?
+    ) -> CapturedImage? {
+        guard let cg = captureWindowPrivate(windowId: windowId) else { return nil }
+        let maxPixel = CaptureDownscale.maxPixelSize(width: cg.width, height: cg.height)
+        let bounds = signature?.bounds
+        let frame = bounds.map {
+            CGRect(x: $0.x, y: $0.y, width: $0.w, height: $0.h)
+        } ?? CGRect(x: 0, y: 0, width: Double(cg.width), height: Double(cg.height))
+        let metadata = CaptureMetadata(
+            producedWidth: cg.width,
+            producedHeight: cg.height,
+            backingScale: backingScale(for: frame),
+            cropOrigin: Point(x: frame.origin.x, y: frame.origin.y),
+            windowId: windowId,
+            windowTitle: nil,
             displayId: displayId(for: frame)
         )
         return KitCapturedImage(cg, maxPixelSize: maxPixel, metadata: metadata)

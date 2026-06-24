@@ -69,7 +69,15 @@ public final class KitInputProvider: InputProvider {
 // MARK: - CaptureProvider (US-022/023/024)
 
 public final class KitCaptureProvider: CaptureProvider {
-    public init() {}
+    /// B2 (US-024): per-window cache of the resolved SCContentFilter, stored as
+    /// `AnyObject` to avoid an availability annotation on a stored property (cast
+    /// to SCContentFilter at the use sites, which are already availability-gated).
+    /// Invalidated on display-config (callback) and window-replace (signature).
+    let filterCache = CaptureFilterCache<AnyObject>()
+
+    public init() {
+        registerDisplayReconfigurationObserver()
+    }
     // listWindows/getWindowBounds/getWindowPid: real impl in KitCaptureProvider.swift (US-022).
     // findWindowIdForAXWindow: real impl in KitWindowBinding.swift (US-020, A4).
     // captureWindow: real SCK impl in KitCaptureProvider.swift (US-022).
