@@ -30,7 +30,7 @@
         "swift build && swift test pass on Linux (existing tests stay green)"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

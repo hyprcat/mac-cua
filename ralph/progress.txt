@@ -23,3 +23,10 @@ Started: (stamped on first ./ralph.sh run)
 - Quality gate: `swift build` clean; `swift test` 362 passed / 0 fail (was 342).
 - Learnings: Core is pure (no macOS imports); model platform NSAttributedString adapters as `protocol` seams in Core, implement in Kit. Apply-order is load-bearing for markdown nesting — keep link-first. Free top-level funcs + `enum` namespaces match the existing Core style (cf. Errors.swift `axError`).
 ---
+
+## US-002 — Port observer.py pure logic: animation-aware debounce/settle state machine
+- Implemented `swift/Sources/MacCUACore/Observer.swift`: `SettleRect` (Equatable key-frame sample), `DebounceStateMachine` (pure, TIME-INJECTED via `tick(now:fingerprint:frameRects:)` — no clock calls inside; NO_CHANGE / SETTLED / TIMEOUT / CANCELLED semantics ported from observer.py `wait_for_settle`; changing frame rects = in-flight animation that keeps it waiting; settle resolves before hard cap so a genuine quiesce wins), and `AssertionTracker` (instance-based, PID-scoped ref counts, `withAssertion` = try/finally via `defer`). Updated the `SettleMonitor` doc in Providers.swift to note Kit drives the machine in its poll loop. The CFRunLoop/AXObserver/NotificationBridge halves of observer.py are macOS-only and stay deferred to Kit (Phase 3, US-025) — only the pure settle/assertion logic is ported here per §5.3 (polling, not AXObserver, is the correctness gate).
+- Sub-agents used: none — tightly-scoped pure-logic story done directly in main thread.
+- Quality gate: `swift build` clean; `swift test` 372 passed / 0 fail (was 362).
+- Learnings: settle is by-observation, never a fixed sleep — model it as a poll-fed state machine that returns nil ("keep polling") vs a terminal SettleResult, with the real clock + poll loop living in the Kit `SettleMonitor` impl. Animation-awareness is just "a changing rect resets the quiet timer exactly like a structural change," so a never-quiescing animation naturally falls through to the hard cap. Keep instance-based (not Python's class-level globals) so Core stays pure/testable.
+---

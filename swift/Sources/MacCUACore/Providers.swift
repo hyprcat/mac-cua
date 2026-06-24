@@ -309,7 +309,9 @@ public protocol SelectionProvider: AnyObject {
 
 /// Event-driven settle by OBSERVATION, not AX notifications (§5.3): poll a cheap
 /// tree fingerprint until two consecutive polls match, bounded by the per-tool
-/// budget. Replaces the unreliable `AXObserver` correctness path.
+/// budget. Replaces the unreliable `AXObserver` correctness path. The Kit impl
+/// drives a `DebounceStateMachine` (Observer.swift) in its poll loop — feeding it
+/// (now, fingerprint, key-frame rects) ticks so animations keep it waiting.
 public protocol SettleMonitor: AnyObject {
     /// Wait until the UI quiesces or the budget elapses.
     func waitForSettle(context: String, timeout: Double, quietPeriod: Double) -> SettleResult
