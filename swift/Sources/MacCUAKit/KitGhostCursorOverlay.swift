@@ -182,6 +182,38 @@ public final class KitGhostCursorOverlay: GhostCursorOverlay {
         }
     }
 
+    public func setClipRegion(windowId: Int, region: [Rect]) {
+        onMain {
+            guard let entry = self.entries[windowId] else { return }
+            // Empty region = fully occluded → hide (keep the entry for a later show).
+            if region.isEmpty {
+                entry.panel.orderOut(nil)
+                return
+            }
+            // Build a mask layer covering the still-visible rectilinear region in
+            // the panel's local (bottom-left) coordinate space, then re-show.
+            let cg = entry.windowCGRect
+            let path = CGMutablePath()
+            for r in region {
+                let localX = r.x - cg.x
+                let localY = cg.h - (r.y - cg.y) - r.h   // top-left CG → bottom-left local
+                path.addRect(CGRect(x: localX, y: localY, width: r.w, height: r.h))
+            }
+            let mask: CAShapeLayer
+            if let existing = entry.panel.contentView?.layer?.mask as? CAShapeLayer {
+                mask = existing
+            } else {
+                mask = CAShapeLayer()
+                entry.panel.contentView?.layer?.mask = mask
+            }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            mask.path = path
+            CATransaction.commit()
+            entry.panel.orderFrontRegardless()
+        }
+    }
+
     public func setWindowFrame(windowId: Int, _ frame: Rect?) {
         onMain {
             guard let entry = self.entries[windowId] else { return }

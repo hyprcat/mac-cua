@@ -16,6 +16,7 @@ final class FakeGhostOverlay: GhostCursorOverlay {
     var pulsed: [Int] = []
     var highlighted: [(Int, Rect)] = []
     var thinking: [(Int, Bool)] = []
+    var clipped: [(Int, [Rect])] = []
 
     func show(windowId: Int, style: GhostCursorStyle, windowFrame: Rect?) {
         shown.append(Shown(windowId: windowId, style: style, frame: windowFrame))
@@ -29,6 +30,7 @@ final class FakeGhostOverlay: GhostCursorOverlay {
     func pulse(windowId: Int) { pulsed.append(windowId) }
     func highlight(windowId: Int, bounds: Rect) { highlighted.append((windowId, bounds)) }
     func setThinking(windowId: Int, active: Bool) { thinking.append((windowId, active)) }
+    func setClipRegion(windowId: Int, region: [Rect]) { clipped.append((windowId, region)) }
 }
 
 final class GhostCursorTests: XCTestCase {
@@ -417,4 +419,111 @@ final class GhostCursorTests: XCTestCase {
         XCTAssertEqual(fake.pulsed, [3])           // click rippled
         XCTAssertEqual(fake.moved.last?.point, Point(x: 10, y: 10))
     }
+
+    // MARK: US-055 — occlusion clipping geometry (pure)
+
+    private func area(_ rs: [Rect]) -> Double { rs.reduce(0) { $0 + $1.w * $1.h } }
+
+    func testNoOccludersWholeWindowVisible() {
+        let t = Rect(x: 0, y: 0, w: 100, h: 100)
+        XCTAssertEqual(GhostOcclusion.visibleRegion(target: t, occluders: []), [t])
+        XCTAssertFalse(GhostOcclusion.isFullyOccluded(target: t, occluders: []))
+    }
+
+    func testFullyOccludedReturnsEmpty() {
+        let t = Rect(x: 10, y: 10, w: 50, h: 50)
+        let cover = Rect(x: 0, y: 0, w: 200, h: 200)
+        XCTAssertTrue(GhostOcclusion.visibleRegion(target: t, occluders: [cover]).isEmpty)
+        XCTAssertTrue(GhostOcclusion.isFullyOccluded(target: t, occluders: [cover]))
+    }
+
+    func testNonOverlappingOccluderIgnored() {
+        let t = Rect(x: 0, y: 0, w: 100, h: 100)
+        let away = Rect(x: 500, y: 500, w: 50, h: 50)
+        XCTAssertEqual(GhostOcclusion.visibleRegion(target: t, occluders: [away]), [t])
+    }
+
+    func testCornerOccluderLeavesLShape() {
+        // Cover the top-left quadrant; remaining visible area = 3/4 of the window.
+        let t = Rect(x: 0, y: 0, w: 100, h: 100)
+        let occ = Rect(x: 0, y: 0, w: 50, h: 50)
+        let region = GhostOcclusion.visibleRegion(target: t, occluders: [occ])
+        XCTAssertFalse(region.isEmpty)
+        XCTAssertEqual(area(region), 100 * 100 - 50 * 50, accuracy: 0.001)
+        // No visible rect overlaps the occluder.
+        for r in region {
+            XCTAssertNil(GhostOcclusion.intersection(r, occ))
+        }
+    }
+
+    func testVerticalStripeMergesIntoTwoRects() {
+        // A central vertical occluder splits the window into left + right strips.
+        let t = Rect(x: 0, y: 0, w: 100, h: 100)
+        let occ = Rect(x: 40, y: 0, w: 20, h: 100)
+        let region = GhostOcclusion.visibleRegion(target: t, occluders: [occ])
+        XCTAssertEqual(region.count, 2)
+        XCTAssertEqual(area(region), 100 * 100 - 20 * 100, accuracy: 0.001)
+    }
+
+    func testOccluderClippedToTarget() {
+        // Occluder pokes past the target on all sides — only the overlap counts.
+        let t = Rect(x: 10, y: 10, w: 80, h: 80)
+        let occ = Rect(x: 0, y: 0, w: 50, h: 200)   // covers left 40px of target
+        let region = GhostOcclusion.visibleRegion(target: t, occluders: [occ])
+        XCTAssertEqual(area(region), 80 * 80 - 40 * 80, accuracy: 0.001)
+    }
+
+    func testDegenerateTargetEmpty() {
+        XCTAssertTrue(GhostOcclusion.visibleRegion(target: Rect(x: 0, y: 0, w: 0, h: 10),
+                                                   occluders: []).isEmpty)
+    }
+
+    // MARK: US-055 — occlusion state machine (edge-triggered)
+
+    func testOcclusionStateEmitsClipThenNone() {
+        var s = GhostOcclusionState()
+        let region = [Rect(x: 0, y: 0, w: 10, h: 10)]
+        XCTAssertEqual(s.update(region: region), .clip(region))
+        XCTAssertEqual(s.update(region: region), .none)      // unchanged → no re-clip
+    }
+
+    func testOcclusionStateHideOnFullyOccluded() {
+        var s = GhostOcclusionState()
+        _ = s.update(region: [Rect(x: 0, y: 0, w: 10, h: 10)])
+        XCTAssertEqual(s.update(region: []), .hide)
+        XCTAssertEqual(s.update(region: []), .none)          // stays hidden
+    }
+
+    func testOcclusionStateReclipsAfterHide() {
+        var s = GhostOcclusionState()
+        let region = [Rect(x: 0, y: 0, w: 10, h: 10)]
+        _ = s.update(region: region)
+        XCTAssertEqual(s.update(region: []), .hide)
+        // Re-emerging emits a clip even though the region equals the last visible one.
+        XCTAssertEqual(s.update(region: region), .clip(region))
+    }
+
+    func testOcclusionStateResetClearsHistory() {
+        var s = GhostOcclusionState()
+        let region = [Rect(x: 0, y: 0, w: 10, h: 10)]
+        _ = s.update(region: region)
+        s.reset()
+        XCTAssertEqual(s.update(region: region), .clip(region))  // emits again after reset
+    }
+
+    // MARK: US-055 — controller.applyOcclusion drives the overlay
+
+    func testApplyOcclusionClipAndHide() {
+        let fake = FakeGhostOverlay()
+        let c = GhostCursorController(overlay: fake)
+        let region = [Rect(x: 0, y: 0, w: 10, h: 10)]
+        c.applyOcclusion(.clip(region), windowId: 7)
+        c.applyOcclusion(.hide, windowId: 7)
+        c.applyOcclusion(.none, windowId: 7)
+        XCTAssertEqual(fake.clipped.count, 1)
+        XCTAssertEqual(fake.clipped.first?.0, 7)
+        XCTAssertEqual(fake.clipped.first?.1, region)
+        XCTAssertEqual(fake.hidden, [7])
+    }
 }
+

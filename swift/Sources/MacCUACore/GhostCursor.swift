@@ -73,12 +73,17 @@ public protocol GhostCursorOverlay: AnyObject {
     func highlight(windowId: Int, bounds: Rect)
     /// Start/stop the idle thinking wiggle on the sprite.
     func setThinking(windowId: Int, active: Bool)
+    // US-055 occlusion clipping (default no-op so existing fakes keep building).
+    /// Clip the ghost to the window's still-visible rectilinear region (CG-global
+    /// rects). An empty region means fully occluded — equivalent to `hide`.
+    func setClipRegion(windowId: Int, region: [Rect])
 }
 
 public extension GhostCursorOverlay {
     func pulse(windowId: Int) {}
     func highlight(windowId: Int, bounds: Rect) {}
     func setThinking(windowId: Int, active: Bool) {}
+    func setClipRegion(windowId: Int, region: [Rect]) {}
 }
 
 // ---------------------------------------------------------------------------
@@ -257,6 +262,179 @@ public struct GhostWindowTrackingState: Sendable {
     }
 }
 
+// ---------------------------------------------------------------------------
+// US-055 — Occlusion clipping v2 (§7.2)
+// ---------------------------------------------------------------------------
+//
+// The decorative ghost must not paint over the parts of its driven window that
+// are *covered by other windows*: when another app's window is stacked above the
+// driven window (in CGS z-order), the ghost should be clipped to only the
+// driven window's still-visible region, and hidden entirely when the driven
+// window is fully occluded. The OS sampling (CGWindowList front-to-back order +
+// bounds) lives in the Kit `KitGhostWindowTracker`; the *geometry* — given the
+// target rect and the rects of the windows above it, what region is still
+// visible — is this pure, Linux-tested code.
+//
+// The visible region is modelled as a list of axis-aligned rectangles (a
+// rectilinear region = target minus the union of the occluder rects). An empty
+// list means the target is fully covered → hide. The AppKit overlay turns the
+// region into a layer mask so the sprite/ripple/highlight are clipped to it.
+
+/// Pure window-occlusion geometry (Linux-tested). All rects are CG-global
+/// (top-left origin); the y-axis orientation is irrelevant to the set algebra.
+public enum GhostOcclusion {
+    /// Compute the still-visible region of `target` after subtracting every
+    /// occluder rect (windows stacked above it). Returns a rectilinear cover:
+    /// a list of disjoint rects whose union is exactly `target \ ∪occluders`.
+    /// An empty result means `target` is fully occluded. A target with no
+    /// occluders returns `[target]` (whole window visible).
+    ///
+    /// Algorithm: slab decomposition. Collect every distinct x- and y-edge from
+    /// the target and the clipped occluders, forming a grid; keep each grid cell
+    /// whose center lies inside the target but inside NO occluder; merge adjacent
+    /// kept cells row-wise then column-wise so the output stays compact.
+    public static func visibleRegion(target: Rect, occluders: [Rect]) -> [Rect] {
+        if target.w <= 0 || target.h <= 0 { return [] }
+        // Clip occluders to the target; drop empties and those that don't overlap.
+        let clipped = occluders.compactMap { intersection(target, $0) }
+                               .filter { $0.w > 0 && $0.h > 0 }
+        if clipped.isEmpty { return [target] }
+
+        // Build the slab grid from all unique edges.
+        var xs: [Double] = [target.x, target.x + target.w]
+        var ys: [Double] = [target.y, target.y + target.h]
+        for o in clipped {
+            xs.append(o.x); xs.append(o.x + o.w)
+            ys.append(o.y); ys.append(o.y + o.h)
+        }
+        xs = uniqueSorted(xs); ys = uniqueSorted(ys)
+
+        // Walk the grid row by row. For each row, build the kept horizontal runs
+        // (maximal x-spans whose cell centers are inside the target and outside
+        // every occluder). Carry "open" rects downward: a run that exactly matches
+        // an open rect's x-span and abuts its bottom edge extends that rect; any
+        // open rect not matched this row is flushed to the output.
+        struct OpenRect { var x0: Double; var x1: Double; var top: Double; var bottom: Double }
+        var out: [Rect] = []
+        var open: [OpenRect] = []
+
+        for yi in 0..<(ys.count - 1) {
+            let y0 = ys[yi], y1 = ys[yi + 1]
+            if y1 <= y0 { continue }
+            let cy = (y0 + y1) / 2
+
+            var runs: [(x0: Double, x1: Double)] = []
+            var runStart: Double? = nil
+            for xi in 0..<(xs.count - 1) {
+                let x0 = xs[xi], x1 = xs[xi + 1]
+                if x1 <= x0 { continue }
+                let cx = (x0 + x1) / 2
+                let kept = contains(target, x: cx, y: cy)
+                    && !clipped.contains(where: { contains($0, x: cx, y: cy) })
+                if kept {
+                    if runStart == nil { runStart = x0 }
+                } else if let s = runStart {
+                    runs.append((s, x0)); runStart = nil
+                }
+            }
+            if let s = runStart { runs.append((s, xs[xs.count - 1])) }
+
+            var nextOpen: [OpenRect] = []
+            var matched = Array(repeating: false, count: open.count)
+            for run in runs {
+                var extended = false
+                for i in 0..<open.count where !matched[i] {
+                    if open[i].x0 == run.x0 && open[i].x1 == run.x1 && open[i].bottom == y0 {
+                        matched[i] = true
+                        nextOpen.append(OpenRect(x0: open[i].x0, x1: open[i].x1,
+                                                 top: open[i].top, bottom: y1))
+                        extended = true
+                        break
+                    }
+                }
+                if !extended {
+                    nextOpen.append(OpenRect(x0: run.x0, x1: run.x1, top: y0, bottom: y1))
+                }
+            }
+            for i in 0..<open.count where !matched[i] {
+                out.append(Rect(x: open[i].x0, y: open[i].top,
+                                w: open[i].x1 - open[i].x0, h: open[i].bottom - open[i].top))
+            }
+            open = nextOpen
+        }
+        for o in open {
+            out.append(Rect(x: o.x0, y: o.top, w: o.x1 - o.x0, h: o.bottom - o.top))
+        }
+        return out
+    }
+
+    /// Whether `target` is fully covered by the union of `occluders`.
+    public static func isFullyOccluded(target: Rect, occluders: [Rect]) -> Bool {
+        visibleRegion(target: target, occluders: occluders).isEmpty
+    }
+
+    static func intersection(_ a: Rect, _ b: Rect) -> Rect? {
+        let x0 = max(a.x, b.x)
+        let y0 = max(a.y, b.y)
+        let x1 = min(a.x + a.w, b.x + b.w)
+        let y1 = min(a.y + a.h, b.y + b.h)
+        if x1 <= x0 || y1 <= y0 { return nil }
+        return Rect(x: x0, y: y0, w: x1 - x0, h: y1 - y0)
+    }
+
+    static func contains(_ r: Rect, x: Double, y: Double) -> Bool {
+        x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h
+    }
+
+    static func uniqueSorted(_ values: [Double]) -> [Double] {
+        var seen: [Double] = []
+        for v in values.sorted() where seen.last != v { seen.append(v) }
+        return seen
+    }
+}
+
+/// The edge-triggered decision for one window's ghost occlusion on a single poll.
+public enum GhostOcclusionAction: Equatable, Sendable {
+    /// No change since the last emitted action — overlay clip untouched.
+    case none
+    /// Target fully covered → hide the ghost (kept entry; a later `clip` re-shows).
+    case hide
+    /// Target partly/fully visible at this rectilinear region → clip the ghost.
+    case clip([Rect])
+}
+
+/// Pure per-window occlusion state machine. One instance per tracked window;
+/// emits a `.clip`/`.hide` only when the visible region changes (edge-triggered),
+/// so the overlay is not re-masked every poll tick. Mirrors
+/// `GhostWindowTrackingState`.
+public struct GhostOcclusionState: Sendable {
+    private var lastRegion: [Rect]?
+    private var hidden = false
+
+    public init() {}
+
+    /// Feed the freshly-computed visible region for this window.
+    public mutating func update(region: [Rect]) -> GhostOcclusionAction {
+        if region.isEmpty {
+            if hidden { return .none }
+            hidden = true
+            lastRegion = []
+            return .hide
+        }
+        if hidden || lastRegion != region {
+            hidden = false
+            lastRegion = region
+            return .clip(region)
+        }
+        return .none
+    }
+
+    public mutating func reset() {
+        lastRegion = nil
+        hidden = false
+    }
+}
+
 /// Pure per-window ghost-cursor registry: assigns a rotating tint per window,
 /// tracks each window's screen frame, and clamps every move to that frame so a
 /// ghost can never paint over another app (§7.2). Linux-testable with a fake (or
@@ -369,6 +547,20 @@ public final class GhostCursorController: GhostCursorDriving {
         case .hide:
             // Keep the assigned tint + last frame; just hide the sprite.
             overlay?.hide(windowId: windowId)
+        }
+    }
+
+    /// Apply an edge-triggered `GhostOcclusionState` action to the overlay (the
+    /// Kit window-tracker chokepoint). `.clip` masks the ghost to the visible
+    /// region, `.hide` orders it out (fully occluded), `.none` is a no-op.
+    public func applyOcclusion(_ action: GhostOcclusionAction, windowId: Int) {
+        switch action {
+        case .none:
+            break
+        case .hide:
+            overlay?.hide(windowId: windowId)
+        case .clip(let region):
+            overlay?.setClipRegion(windowId: windowId, region: region)
         }
     }
 

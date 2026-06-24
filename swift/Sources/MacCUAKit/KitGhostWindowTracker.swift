@@ -27,6 +27,7 @@ public final class KitGhostWindowTracker {
     private let pollInterval: Double
 
     private var states: [Int: GhostWindowTrackingState] = [:]
+    private var occlusionStates: [Int: GhostOcclusionState] = [:]
     private var timer: CFRunLoopTimer?
     private var running = false
 
@@ -42,12 +43,16 @@ public final class KitGhostWindowTracker {
     public func track(windowId: Int) {
         lock.lock()
         if states[windowId] == nil { states[windowId] = GhostWindowTrackingState() }
+        if occlusionStates[windowId] == nil { occlusionStates[windowId] = GhostOcclusionState() }
         lock.unlock()
     }
 
     /// Stop following a window (session teardown removes the ghost separately).
     public func untrack(windowId: Int) {
-        lock.lock(); states.removeValue(forKey: windowId); lock.unlock()
+        lock.lock()
+        states.removeValue(forKey: windowId)
+        occlusionStates.removeValue(forKey: windowId)
+        lock.unlock()
     }
 
     public func start() {
@@ -83,6 +88,7 @@ public final class KitGhostWindowTracker {
         let t = timer
         timer = nil
         for id in states.keys { states[id]?.reset() }
+        for id in occlusionStates.keys { occlusionStates[id]?.reset() }
         lock.unlock()
         if let t { CFRunLoopTimerInvalidate(t) }
     }
@@ -95,7 +101,15 @@ public final class KitGhostWindowTracker {
         lock.unlock()
         guard !ids.isEmpty else { return }
 
-        let samples = Self.sampleWindows(ids: Set(ids))
+        // One ordered read of the full window list feeds both the follow/hide
+        // tracking AND the per-window occlusion clip (windows above the target).
+        let ordered = Self.sampleOrdered()
+        let idSet = Set(ids)
+        var samples: [Int: GhostWindowSample] = [:]
+        for w in ordered where idSet.contains(w.number) {
+            samples[w.number] = GhostWindowSample(bounds: w.bounds, isOnscreen: w.onscreen)
+        }
+
         for id in ids {
             lock.lock()
             var st = states[id] ?? GhostWindowTrackingState()
@@ -103,31 +117,62 @@ public final class KitGhostWindowTracker {
             states[id] = st
             lock.unlock()
             controller.apply(action, windowId: id)
+
+            // Occlusion only matters for an on-screen, visible window.
+            let occAction: GhostOcclusionAction
+            if let sample = samples[id], sample.isOnscreen {
+                let occluders = Self.occluders(for: id, in: ordered)
+                let region = GhostOcclusion.visibleRegion(target: sample.bounds,
+                                                          occluders: occluders)
+                lock.lock()
+                var os = occlusionStates[id] ?? GhostOcclusionState()
+                occAction = os.update(region: region)
+                occlusionStates[id] = os
+                lock.unlock()
+            } else {
+                // Off-screen: the follow path already hid it; reset occlusion so a
+                // later re-show recomputes the clip from scratch.
+                lock.lock()
+                occlusionStates[id]?.reset()
+                lock.unlock()
+                occAction = .none
+            }
+            controller.applyOcclusion(occAction, windowId: id)
         }
     }
 
-    /// Read the bounds + on-screen flag for the requested windowIds from the
-    /// full window list. Windows absent from the list (closed / off the list when
-    /// minimized) map to `nil` (no entry) — the state machine treats that as hide.
-    static func sampleWindows(ids: Set<Int>) -> [Int: GhostWindowSample] {
+    /// An on-screen window from the front-to-back ordered list.
+    struct OrderedWindow { let number: Int; let bounds: Rect; let onscreen: Bool }
+
+    /// The occluders of `id`: every on-screen window stacked ABOVE it (earlier in
+    /// the front-to-back list) whose bounds overlap. Windows at or below the
+    /// target do not occlude it.
+    static func occluders(for id: Int, in ordered: [OrderedWindow]) -> [Rect] {
+        guard let idx = ordered.firstIndex(where: { $0.number == id }) else { return [] }
+        var out: [Rect] = []
+        for i in 0..<idx where ordered[i].onscreen {
+            out.append(ordered[i].bounds)
+        }
+        return out
+    }
+
+    /// Read the full front-to-back window list once (number + bounds + on-screen).
+    static func sampleOrdered() -> [OrderedWindow] {
         guard let info = CGWindowListCopyWindowInfo(
             [.optionAll], kCGNullWindowID
-        ) as? [[String: Any]] else { return [:] }
-
-        var out: [Int: GhostWindowSample] = [:]
+        ) as? [[String: Any]] else { return [] }
+        var out: [OrderedWindow] = []
         for entry in info {
             guard let num = entry[kCGWindowNumber as String] as? Int,
-                  ids.contains(num),
                   let boundsDict = entry[kCGWindowBounds as String] as? [String: Any],
                   let rect = CGRect(dictionaryRepresentation: boundsDict as CFDictionary)
             else { continue }
-            // kCGWindowIsOnscreen absent ⇒ not on screen (minimized / off-Space).
             let onscreen = (entry[kCGWindowIsOnscreen as String] as? Bool) ?? false
-            out[num] = GhostWindowSample(
+            out.append(OrderedWindow(
+                number: num,
                 bounds: Rect(x: Double(rect.origin.x), y: Double(rect.origin.y),
                              w: Double(rect.size.width), h: Double(rect.size.height)),
-                isOnscreen: onscreen
-            )
+                onscreen: onscreen))
         }
         return out
     }
