@@ -88,6 +88,13 @@ public final class SessionManager {
     var guidanceCache: [String: String?] = [:]
     var trackersStarted = false
 
+    // Decorative ghost-cursor registry (§7, multi-cursor identity). One per
+    // SessionManager, keyed by windowId: assigns a distinct tint per driven
+    // window and is the sink for `BackgroundCursor` logical-move chokepoints.
+    // The AppKit overlay is wired in Phase 6 (`ghostController.overlay`); until
+    // then it is a pure no-render registry (Linux-green).
+    let ghostController = GhostCursorController()
+
     public init(
         providers: Providers,
         flags: FeatureFlags = FeatureFlags.load(),

@@ -1,0 +1,146 @@
+import Foundation
+
+// ---------------------------------------------------------------------------
+// Ghost cursor seam (decorative virtual-cursor overlay) — SWIFT_PORT_DESIGN §7
+// ---------------------------------------------------------------------------
+//
+// The *logical* cursor lives in `BackgroundCursor` (one per AppSession): its
+// `moveTo` only updates an internal coordinate; the OS cursor never moves. This
+// file adds the **decorative** half: a per-window translucent ghost sprite that
+// renders where the logical cursor already is. It is decorative ONLY — it never
+// routes through the system cursor, never warps, never foregrounds.
+//
+// Phase split (§7.4):
+//   - This file is the Linux-buildable/testable Core seam: the pure
+//     `GhostCursorController` (rotating tint palette + `clampPointToWindow` +
+//     per-window registry) driving the `GhostCursorOverlay` protocol.
+//   - Phase 6 supplies the AppKit `GhostCursorOverlay` impl (NSPanel per window,
+//     CALayer sprite, window-follow, animations) in MacCUAKit.
+//   - Phase 4 (this story, US-039) wires `BackgroundCursor` position changes →
+//     `GhostCursorController.move(windowId:)` through the `GhostCursorDriving`
+//     chokepoint, so every logical move updates the ghost automatically.
+
+/// A translucent tint assigned to one driven window's ghost cursor. Concurrent
+/// sessions get distinct tints from a rotating palette so parallel agents are
+/// visually separable (§7.3, K2). RGBA components are 0…1.
+public struct GhostCursorStyle: Sendable, Equatable {
+    public let name: String
+    public let red: Double
+    public let green: Double
+    public let blue: Double
+    public let alpha: Double
+
+    public init(name: String, red: Double, green: Double, blue: Double, alpha: Double = 0.75) {
+        self.name = name
+        self.red = red
+        self.green = green
+        self.blue = blue
+        self.alpha = alpha
+    }
+}
+
+/// The default rotating palette (distinct, high-contrast translucent tints).
+public enum GhostCursorPalette {
+    public static let styles: [GhostCursorStyle] = [
+        GhostCursorStyle(name: "cyan", red: 0.0, green: 0.78, blue: 0.92),
+        GhostCursorStyle(name: "magenta", red: 0.93, green: 0.18, blue: 0.66),
+        GhostCursorStyle(name: "amber", red: 1.0, green: 0.65, blue: 0.0),
+        GhostCursorStyle(name: "green", red: 0.20, green: 0.80, blue: 0.35),
+        GhostCursorStyle(name: "violet", red: 0.55, green: 0.36, blue: 0.96),
+        GhostCursorStyle(name: "red", red: 0.92, green: 0.26, blue: 0.21),
+    ]
+}
+
+/// The AppKit rendering seam (impl deferred to Phase 6 in MacCUAKit). Every call
+/// is decorative: the overlay must be a non-activating, click-through panel
+/// (`ignoresMouseEvents = true`, `canBecomeKey/Main = false`) clamped to the
+/// target window's screen rect. NONE of these may foreground/raise/warp.
+public protocol GhostCursorOverlay: AnyObject {
+    /// Begin showing a ghost for a window with the given tint + window screen rect.
+    func show(windowId: Int, style: GhostCursorStyle, windowFrame: Rect?)
+    /// Move the ghost sprite to a (window-clamped) screen point.
+    func move(windowId: Int, to point: Point, animated: Bool)
+    /// Follow the window when it moves/resizes (or hide if off-screen → nil).
+    func setWindowFrame(windowId: Int, _ frame: Rect?)
+    /// Temporarily hide (minimize/occlusion) without forgetting the window.
+    func hide(windowId: Int)
+    /// Tear down the ghost for a window (session teardown).
+    func remove(windowId: Int)
+}
+
+/// The single chokepoint a `BackgroundCursor` drives on every logical move.
+/// `GhostCursorController` conforms; `BackgroundCursor` holds a `weak` reference
+/// so the controller's per-window registry never keeps a session alive.
+public protocol GhostCursorDriving: AnyObject {
+    func move(windowId: Int, to point: Point, animated: Bool)
+}
+
+/// Pure per-window ghost-cursor registry: assigns a rotating tint per window,
+/// tracks each window's screen frame, and clamps every move to that frame so a
+/// ghost can never paint over another app (§7.2). Linux-testable with a fake (or
+/// nil) overlay; the AppKit overlay is wired in Phase 6.
+public final class GhostCursorController: GhostCursorDriving {
+    private let palette: [GhostCursorStyle]
+    public weak var overlay: GhostCursorOverlay?
+
+    private var styles: [Int: GhostCursorStyle] = [:]
+    private var frames: [Int: Rect] = [:]
+    private var nextStyleIndex = 0
+
+    public init(palette: [GhostCursorStyle] = GhostCursorPalette.styles,
+                overlay: GhostCursorOverlay? = nil) {
+        self.palette = palette.isEmpty ? GhostCursorPalette.styles : palette
+        self.overlay = overlay
+    }
+
+    /// Clamp a point to a window's screen rect (inclusive of edges). Pure.
+    public static func clampPointToWindow(_ point: Point, _ frame: Rect) -> Point {
+        if frame.w <= 0 || frame.h <= 0 { return point }
+        let x = min(max(point.x, frame.x), frame.x + frame.w)
+        let y = min(max(point.y, frame.y), frame.y + frame.h)
+        return Point(x: x, y: y)
+    }
+
+    /// The tint currently assigned to a window (nil if not tracked). For tests.
+    public func style(forWindowId windowId: Int) -> GhostCursorStyle? {
+        styles[windowId]
+    }
+
+    /// Begin tracking a driven window: assign a tint (stable across calls) and
+    /// announce it to the overlay. Idempotent — re-tracking keeps the same tint.
+    @discardableResult
+    public func startTracking(windowId: Int, windowFrame: Rect? = nil) -> GhostCursorStyle {
+        let style: GhostCursorStyle
+        if let existing = styles[windowId] {
+            style = existing
+        } else {
+            style = palette[nextStyleIndex % palette.count]
+            nextStyleIndex += 1
+            styles[windowId] = style
+        }
+        if let windowFrame { frames[windowId] = windowFrame }
+        overlay?.show(windowId: windowId, style: style, windowFrame: frames[windowId])
+        return style
+    }
+
+    /// Drive the ghost to a logical point (the `BackgroundCursor` chokepoint).
+    /// Clamps to the known window frame so the sprite stays on its own window.
+    public func move(windowId: Int, to point: Point, animated: Bool = false) {
+        let clamped = frames[windowId].map { GhostCursorController.clampPointToWindow(point, $0) } ?? point
+        overlay?.move(windowId: windowId, to: clamped, animated: animated)
+    }
+
+    /// Update a tracked window's screen frame (window moved/resized; nil = hide).
+    public func windowMoved(windowId: Int, frame: Rect?) {
+        if let frame { frames[windowId] = frame } else { frames.removeValue(forKey: windowId) }
+        overlay?.setWindowFrame(windowId: windowId, frame)
+    }
+
+    /// Stop tracking a window (session teardown): forget its tint + frame and
+    /// remove the overlay. The freed tint slot is reused by the next new window.
+    public func stopTracking(windowId: Int) {
+        styles.removeValue(forKey: windowId)
+        frames.removeValue(forKey: windowId)
+        overlay?.remove(windowId: windowId)
+    }
+}

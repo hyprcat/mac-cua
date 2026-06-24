@@ -63,6 +63,7 @@ extension SessionManager {
             )
         } else if let x = doubleParam(params["x"]), let y = doubleParam(params["y"]) {
             let (sx, sy) = toScreenCoords(session, t.windowId, x, y)
+            noteCursor(session, Point(x: sx, y: sy))
             if let r = tryAXHitTestClickAtPoint(
                 session, sx, sy, displayX: x, displayY: y, button: button, count: count
             ) { return r }
@@ -328,6 +329,7 @@ extension SessionManager {
         let fromY = doubleParam(params["from_y"]) ?? 0
         let toX = doubleParam(params["to_x"]) ?? 0
         let toY = doubleParam(params["to_y"]) ?? 0
+        noteCursor(session, Point(x: toX, y: toY))
 
         do {
             try providers.input.drag(
@@ -480,6 +482,7 @@ extension SessionManager {
         if node == nil && scrollPoint == nil {
             throw AutomationError.automation("scroll requires either element_index or x/y coordinates")
         }
+        if let p = scrollPoint { noteCursor(session, p) }
 
         let preferAX = session.inputStrategy?.shouldUseAXAction(
             .scroll, isWebArea: node?.isWebArea ?? false
@@ -526,6 +529,7 @@ extension SessionManager {
         var targetNode = prepareNodeForPointerClick(session, node)
         targetNode = resolveClickTargetNode(session, targetNode)
         guard let point = clickPointForNode(session, targetNode) else { return false }
+        noteCursor(session, point)
         do {
             let transportMark = session.cgeventOutcomeMonitor?.mark() ?? 0
             try providers.input.clickAtScreenPoint(
@@ -1304,6 +1308,14 @@ extension SessionManager {
         )
         session.lastDeliveryVerdict = verdict
         return verdict
+    }
+
+    /// Update the session's logical cursor to a delivery point (F / US-039). This
+    /// is the single chokepoint that drives the decorative ghost overlay via
+    /// `BackgroundCursor.moveTo` (render deferred to Phase 6). Logical only — the
+    /// OS cursor never moves (Prime Invariant / Invariant 2).
+    func noteCursor(_ session: AppSession, _ point: Point) {
+        session.cursor?.moveTo(point)
     }
 
     /// Mirrors `_safe_perform_action`: perform an action on a node, swallowing errors.

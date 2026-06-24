@@ -72,6 +72,11 @@ extension SessionManager {
             session = resolved
             let isStateOnly = (tool == "get_app_state" || tool == "list_apps")
 
+            // Pre-action state for the feedback packet (F / US-039): the logical
+            // cursor position and the pre-action tree (for the change summary).
+            let cursorBefore = isStateOnly ? nil : resolved.cursor?.position
+            let preNodes = isStateOnly ? [] : resolved.treeNodes
+
             // Save the user's frontmost so we can restore it (Invariant 15).
             if !isStateOnly {
                 previousFrontmost = providers.apps.getFrontmostApp()
@@ -115,6 +120,11 @@ extension SessionManager {
                 }
                 var r = response
                 r.result = result
+                if !isStateOnly {
+                    attachActionFeedback(
+                        &r, tool: tool, result: result, session: resolved,
+                        cursorBefore: cursorBefore, preNodes: preNodes)
+                }
                 providers.analytics.serviceResult(tool, success: true, durationMs: 0.0)
                 restorePreviousFrontmostApp(resolved, previousFrontmost)
                 return r
@@ -149,6 +159,11 @@ extension SessionManager {
             // Step 10: capture snapshot (session already validated in resolve).
             var response = takeSnapshot(resolved, skipRefresh: true)
             response.result = result
+            if !isStateOnly {
+                attachActionFeedback(
+                    &response, tool: tool, result: result, session: resolved,
+                    cursorBefore: cursorBefore, preNodes: preNodes)
+            }
             providers.analytics.serviceResult(tool, success: true, durationMs: 0.0)
 
             // get_app_state: clear yield state + deliver once-per-session guidance.
@@ -318,6 +333,23 @@ extension SessionManager {
         if flags.confirmedDelivery && session.eventSource == nil {
             session.eventSource = providers.input.createEventSource()
         }
+        // One BackgroundCursor per session (logical position only — the OS cursor
+        // never moves). Its `moveTo` chokepoint drives the decorative ghost
+        // overlay via `ghostController` (render deferred to Phase 6). [US-039]
+        if session.cursor == nil {
+            let cursor = BackgroundCursor(
+                pid: session.target.pid, windowId: session.target.windowId)
+            cursor.ghost = ghostController
+            session.cursor = cursor
+            ghostController.startTracking(
+                windowId: session.target.windowId,
+                windowFrame: providers.capture.getWindowBounds(windowId: session.target.windowId))
+        } else {
+            // Window may have moved/rebound — keep the ghost's frame current.
+            ghostController.windowMoved(
+                windowId: session.target.windowId,
+                frame: providers.capture.getWindowBounds(windowId: session.target.windowId))
+        }
         primeEnhancedUI(session)
     }
 
@@ -369,6 +401,8 @@ extension SessionManager {
         session.axOutcomeMonitor = nil
         session.cgeventOutcomeMonitor = nil
         session.eventSource = nil
+        ghostController.stopTracking(windowId: session.target.windowId)
+        session.cursor = nil
     }
 
     /// Ports `_ensure_session_observer_ready` (session.py:586). Re-binds the
@@ -707,6 +741,36 @@ extension SessionManager {
         case "perform_secondary_action": return try handleSecondaryAction(session, params)
         default: throw AutomationError.automation("Unknown tool: \(tool)")
         }
+    }
+
+    // MARK: Action feedback (F / US-039)
+
+    /// Populate the action-feedback packet (F) with the real delivery path, the
+    /// target window identity, the logical cursor before/after, and the tree-wide
+    /// change summary (E3 / US-003). Read-only tools never get a packet (handled
+    /// by the caller's `!isStateOnly` guard).
+    func attachActionFeedback(
+        _ response: inout ToolResponse, tool: String, result: String,
+        session: AppSession, cursorBefore: Point?, preNodes: [Node]
+    ) {
+        let summary = TreeDiff.changeSummary(pre: preNodes, post: response.treeNodes)
+        response.actionFeedback = ActionFeedback(
+            deliveryPath: deliveryPath(forTool: tool, result: result, session: session),
+            windowId: session.target.windowId,
+            windowTitle: response.windowTitle,
+            cursorBefore: cursorBefore,
+            cursorAfter: session.cursor?.position,
+            changeSummary: summary)
+    }
+
+    /// Derive the delivery path for the feedback packet. Scroll's path comes from
+    /// the cached working method (`pixel`/`pid` = wheel, `ax`/`scrollbar` = AX);
+    /// every other tool is classified from its success message (pure Core helper).
+    func deliveryPath(forTool tool: String, result: String, session: AppSession) -> DeliveryPath {
+        if tool == "scroll", let method = session.scrollMethod {
+            return (method == "pixel" || method == "pid") ? .wheel : .axPress
+        }
+        return DeliveryPath.classify(message: result)
     }
 
     // MARK: Snapshot — ports take_snapshot (session.py:2315)

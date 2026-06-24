@@ -402,6 +402,12 @@ public final class BackgroundCursor: VirtualCursor {
     private var screenshotSize: Size?
     private let delivery: PointerEventDelivering?
 
+    /// The decorative ghost overlay driver (§7). Held `weak` so the controller's
+    /// per-window registry never keeps this session's cursor alive. When set,
+    /// EVERY logical position change forwards through `ghost.move(windowId:)` —
+    /// the single chokepoint that drives the ghost overlay (render in Phase 6).
+    public weak var ghost: GhostCursorDriving?
+
     public init(pid: Int, windowId: Int, delivery: PointerEventDelivering? = nil) {
         self.pid = pid
         self.windowId = windowId
@@ -409,6 +415,13 @@ public final class BackgroundCursor: VirtualCursor {
     }
 
     public var position: Point { _position }
+
+    /// The single chokepoint for logical-position changes. Updates the internal
+    /// coordinate (the OS cursor never moves) and notifies the ghost overlay.
+    private func setPosition(_ position: Point, animated: Bool) {
+        _position = position
+        ghost?.move(windowId: windowId, to: position, animated: animated)
+    }
 
     public var positionInScaledCoordinates: Point {
         Point(x: _position.x / scaleFactor, y: _position.y / scaleFactor)
@@ -423,12 +436,12 @@ public final class BackgroundCursor: VirtualCursor {
     /// Move cursor position (no visual, just track internally).
     /// Mirrors `move_to`.
     public func moveTo(_ position: Point, animated: Bool = false) {
-        _position = position
+        setPosition(position, animated: animated)
     }
 
     /// Click via the delivery seam. Mirrors `click_at`.
     public func clickAt(_ position: Point) {
-        _position = position
+        setPosition(position, animated: false)
         delivery?.clickAt(pid: pid, windowId: windowId,
                           x: position.x, y: position.y,
                           button: .left, count: 1,
@@ -437,7 +450,7 @@ public final class BackgroundCursor: VirtualCursor {
 
     /// Double-click via the delivery seam. Mirrors `double_click_at`.
     public func doubleClickAt(_ position: Point) {
-        _position = position
+        setPosition(position, animated: false)
         delivery?.clickAt(pid: pid, windowId: windowId,
                           x: position.x, y: position.y,
                           button: .left, count: 2,
@@ -446,7 +459,7 @@ public final class BackgroundCursor: VirtualCursor {
 
     /// Right-click via the delivery seam. Mirrors `right_click_at`.
     public func rightClickAt(_ position: Point) {
-        _position = position
+        setPosition(position, animated: false)
         delivery?.clickAt(pid: pid, windowId: windowId,
                           x: position.x, y: position.y,
                           button: .right, count: 1,
@@ -455,7 +468,7 @@ public final class BackgroundCursor: VirtualCursor {
 
     /// Drag via the delivery seam. Mirrors `drag`.
     public func drag(from: Point, to: Point) {
-        _position = to
+        setPosition(to, animated: true)
         delivery?.drag(pid: pid, windowId: windowId,
                        fromX: from.x, fromY: from.y,
                        toX: to.x, toY: to.y,

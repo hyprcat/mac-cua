@@ -213,6 +213,28 @@ public enum DeliveryPath: String, Sendable, Equatable {
     case psn = "PSN"
     /// Scroll-wheel delivery (CGEvent scroll-wheel).
     case wheel = "wheel"
+
+    /// Derive the delivery path from a handler's success message (F / US-039).
+    /// The handlers encode the path they actually used in their result string
+    /// (e.g. "(CGEventPostToPid)", "(AXPress)", "Scrolled …", "Dragged …"); this
+    /// pure classifier maps that to a `DeliveryPath` for the feedback packet. AX
+    /// markers map to `.axPress`; per-pid pointer/key delivery to `.cgEvent`;
+    /// scrolls to `.wheel`. CGEvent markers are checked before AX so a
+    /// "(CGEventPostToPid, refreshed window)" message is never misread as AX.
+    public static func classify(message: String) -> DeliveryPath {
+        if message.contains("CGEventPostToPid")
+            || message.contains("background key")
+            || message.contains("Dragged") {
+            return .cgEvent
+        }
+        if message.contains("Scrolled") {
+            return .wheel
+        }
+        if message.contains("AX") || message.contains("EditableTextObject") {
+            return .axPress
+        }
+        return .cgEvent
+    }
 }
 
 /// Per-action feedback returned to the model after every action (F). Carries the
