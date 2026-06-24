@@ -22,6 +22,25 @@ private func axElement(_ ref: AXElementRef?) -> AXUIElement? {
     (ref as? KitAXElementRef)?.element
 }
 
+// MARK: - Private ApplicationServices SPI (per-symbol-optional, dlsym-resolved)
+
+/// `AXError _AXUIElementGetWindow(AXUIElementRef, CGWindowID *out)` — private,
+/// returns the window id of an AX window/element directly (A4). Resolved once at
+/// load via `dlsym(RTLD_DEFAULT,…)`; nil when the symbol is unavailable (e.g. a
+/// future macOS SPI-removal), in which case callers fall back to bounds/title
+/// matching. Resolving it does not call it — no side effects, never foregrounds.
+enum AXPrivateSPI {
+    typealias GetWindowFn = @convention(c) (AXUIElement, UnsafeMutablePointer<CGWindowID>) -> AXError
+
+    static let getWindow: GetWindowFn? = {
+        // RTLD_DEFAULT searches all loaded images (ApplicationServices is linked).
+        guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "_AXUIElementGetWindow") else {
+            return nil
+        }
+        return unsafeBitCast(sym, to: GetWindowFn.self)
+    }()
+}
+
 // MARK: - CFType -> AXScalar normalization
 
 private func axScalar(from value: CFTypeRef) -> AXScalar? {
@@ -249,6 +268,18 @@ public final class KitAccessibilityProvider: AccessibilityProvider {
     }
 
     // MARK: Element queries (reads)
+
+    /// Direct AX-element → CGWindowID via the private `_AXUIElementGetWindow`
+    /// SPI (A4). Resolved per-symbol-optional at runtime: when absent, returns
+    /// nil and the caller falls back to bounds/title matching. Read-only.
+    public func windowIdForElement(_ axRef: AXElementRef) -> Int? {
+        guard let el = axElement(axRef) else { return nil }
+        guard let fn = AXPrivateSPI.getWindow else { return nil }
+        var wid: CGWindowID = 0
+        let err = fn(el, &wid)
+        guard err == .success, wid != 0 else { return nil }
+        return Int(wid)
+    }
 
     public func getFocusedElement(axApp: AXElementRef, tree: [Node]) -> Int? {
         guard let app = axElement(axApp),

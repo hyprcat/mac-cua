@@ -79,5 +79,21 @@ final class StubsTests: XCTestCase {
         _ = KitAppResolver().checkAccessibilityPermission(prompt: false)
         _ = KitCaptureProvider().checkScreenRecordingPermission()
     }
+
+    func testWindowIdForEmptyRefIsNilNonActivating() {
+        // US-020 (A4): an element with no backing AXUIElement has no window id.
+        // The private _AXUIElementGetWindow binding must fail honestly (nil),
+        // never crash, never foreground. The real multi-window binding is
+        // MANUAL-VERIFY against live apps.
+        let p = KitAccessibilityProvider()
+        XCTAssertNil(p.windowIdForElement(KitAXElementRef()))
+    }
+
+    func testFindWindowIdForEmptyAXWindowFallsBackCleanly() {
+        // With no backing element the SPI yields nil and the bounds/title
+        // fallback runs over the live window list with an empty signature —
+        // it must return without crashing (id is host-dependent / may be nil).
+        _ = KitCaptureProvider().findWindowIdForAXWindow(pid: -1, axWindow: KitAXElementRef())
+    }
 }
 #endif

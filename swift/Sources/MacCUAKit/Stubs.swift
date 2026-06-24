@@ -78,7 +78,7 @@ public final class KitCaptureProvider: CaptureProvider {
     public func listWindows(ownerPid: Int?) -> [WindowInfo] { [] }
     public func getWindowBounds(windowId: Int) -> Rect? { nil }
     public func getWindowPid(windowId: Int) -> Int? { nil }
-    public func findWindowIdForAXWindow(pid: Int, axWindow: AXElementRef) -> Int? { nil }
+    // findWindowIdForAXWindow: real impl in KitWindowBinding.swift (US-020, A4).
     public func captureWindow(windowId: Int, includeCursor: Bool) throws -> CapturedImage? { unimplemented() }
     /// Real Screen-Recording preflight (US-015): query without prompting.
     public func checkScreenRecordingPermission() -> Bool {

@@ -212,6 +212,11 @@ public protocol AccessibilityProvider: AnyObject {
     func enableEnhancedUI(axApp: AXElementRef, pid: Int) throws -> Bool
 
     // Element queries (reads)
+    /// Direct AX-element → CGWindowID binding via the private
+    /// `_AXUIElementGetWindow` SPI (A4). Returns nil when the symbol is absent
+    /// (per-symbol-optional) or the element has no window; callers fall back to
+    /// bounds/title matching (`WindowMatcher`). Read-only: never raises/focuses.
+    func windowIdForElement(_ axRef: AXElementRef) -> Int?
     func getFocusedElement(axApp: AXElementRef, tree: [Node]) -> Int?
     func getElementFrame(node: Node) -> Rect?
     func elementAtPosition(axApp: AXElementRef, x: Double, y: Double) -> AXElementRef?
@@ -242,6 +247,10 @@ public extension AccessibilityProvider {
     /// not enable enhanced UI. The real write lives in MacCUAKit.
     @discardableResult
     func enableEnhancedUI(axApp: AXElementRef, pid: Int) throws -> Bool { false }
+
+    /// Default: no private SPI (fakes, Linux). Callers fall back to bounds/title
+    /// matching via `WindowMatcher`.
+    func windowIdForElement(_ axRef: AXElementRef) -> Int? { nil }
 }
 
 // MARK: - InputProvider (input.py)
