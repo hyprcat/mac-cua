@@ -22,9 +22,11 @@ final class ServerLayerTests: XCTestCase {
             "set_value",
             "scroll",
             "perform_secondary_action",
+            "batch",
         ])
-        // TOOL_DEFS in server.py has 9 entries: list_apps + the 8 action tools.
-        XCTAssertEqual(toolDefs.count, 9)
+        // server.py's TOOL_DEFS has 9 entries (list_apps + the 8 action tools);
+        // `batch` (Codex parity §D3, US-008) is appended → 10.
+        XCTAssertEqual(toolDefs.count, 10)
     }
 
     func testToolDefRequiredFieldsMatchPython() {
@@ -219,7 +221,8 @@ final class ServerLayerTests: XCTestCase {
             permissions: PermissionsGate(apps: FakeAppResolver(), capture: FakeCapture())
         )
         XCTAssertEqual(server.listTools().map(\.name).first, "list_apps")
-        XCTAssertEqual(server.listTools().count, 9)
+        XCTAssertEqual(server.listTools().count, 10)
+        XCTAssertEqual(server.listTools().map(\.name).last, "batch")
     }
 
     func testMCPServerCallToolGateReturnsPendingMessage() {

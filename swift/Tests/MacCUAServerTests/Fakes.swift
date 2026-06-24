@@ -109,8 +109,14 @@ final class FakeAccessibility: AccessibilityProvider {
     /// Scrollbar predicate for `hasScrollbarRef`.
     var scrollbarRefs: Set<ObjectIdentifier> = []
 
+    /// Count of `walkTree` invocations — lets batch tests assert the pre-action
+    /// tree is reused (walked once) instead of re-walked per step. [SPINE TEST HOOK]
+    private(set) var walkCount = 0
     func walkTree(axElement: AXElementRef, targetPid: Int?, maxDepth: Int, maxNodes: Int,
-                  includeActions: Bool, includeStates: Bool) throws -> [Node] { tree }
+                  includeActions: Bool, includeStates: Bool) throws -> [Node] {
+        walkCount += 1
+        return tree
+    }
     func getKeyWindow(axApp: AXElementRef) -> AXElementRef? { keyWindow }
     func getWindows(axApp: AXElementRef) -> [AXElementRef] {
         if let perApp = windowsForAXApp?(axApp) { return perApp }

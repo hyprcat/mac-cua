@@ -34,8 +34,9 @@ public struct ToolDef {
     }
 }
 
-/// The 8 tools exposed by the server, in `server.py` order. Names, descriptions
-/// and schemas are copied verbatim from `TOOL_DEFS`.
+/// The tools exposed by the server. The original 9 are in `server.py` order with
+/// names, descriptions and schemas copied verbatim from `TOOL_DEFS`; `batch`
+/// (Codex parity §D3) is appended.
 ///
 /// Exposed as a computed property (rather than a stored global) because each
 /// `inputSchema` is `[String: Any]`, which is not `Sendable`; recomputing avoids
@@ -212,6 +213,65 @@ public var toolDefs: [ToolDef] {[
                 "action": ["type": "string", "description": "Action name from element's secondary_actions list"],
             ],
             "required": ["element_index", "action"],
+            "additionalProperties": false,
+        ]
+    ),
+    // NEW (Codex parity §D3): N actions in one MCP call. Linear, stop-on-first-
+    // failure, one final snapshot — removes N-1 round-trips. Not in server.py.
+    ToolDef(
+        name: "batch",
+        description: (
+            "Execute several actions in one call. Actions run sequentially in the "
+            + "order given and STOP at the first failure; one final screenshot + "
+            + "accessibility-tree snapshot is returned along with a per-step outcome "
+            + "list. Each action is an object with a 'tool' field (one of click, "
+            + "type_text, set_value, press_key, scroll, drag, "
+            + "perform_secondary_action) plus that tool's own parameters. An action "
+            + "may carry its own window_id/app to retarget; otherwise it reuses the "
+            + "previous action's target. Use this to save round-trips when the next "
+            + "action does not depend on seeing the result of the previous one."
+        ),
+        inputSchema: [
+            "type": "object",
+            "properties": [
+                "actions": [
+                    "type": "array",
+                    "description": "Ordered list of action items to run sequentially.",
+                    "minItems": 1,
+                    "items": [
+                        "type": "object",
+                        "properties": [
+                            "tool": [
+                                "type": "string",
+                                "enum": [
+                                    "click", "type_text", "set_value", "press_key",
+                                    "scroll", "drag", "perform_secondary_action",
+                                ],
+                                "description": "The action tool to run for this step",
+                            ],
+                            "app": ["type": "string", "description": "Optional retarget: app name or bundle identifier"],
+                            "window_id": ["type": "integer", "description": "Optional retarget: target window ID"],
+                            "element_index": ["type": "string", "description": "Element index from the accessibility tree"],
+                            "value": ["type": "string", "description": "Value for set_value"],
+                            "text": ["type": "string", "description": "Text for type_text"],
+                            "key": ["type": "string", "description": "Key combo for press_key"],
+                            "action": ["type": "string", "description": "Action name for perform_secondary_action"],
+                            "direction": ["type": "string", "description": "Scroll direction"],
+                            "pages": ["type": "integer", "description": "Scroll pages"],
+                            "x": ["type": "number", "description": "X coordinate (screenshot pixel space)"],
+                            "y": ["type": "number", "description": "Y coordinate (screenshot pixel space)"],
+                            "from_x": ["type": "number", "description": "Drag start X"],
+                            "from_y": ["type": "number", "description": "Drag start Y"],
+                            "to_x": ["type": "number", "description": "Drag end X"],
+                            "to_y": ["type": "number", "description": "Drag end Y"],
+                            "click_count": ["type": "integer", "description": "Number of clicks"],
+                            "mouse_button": ["type": "string", "description": "Mouse button"],
+                        ],
+                        "required": ["tool"],
+                    ],
+                ],
+            ],
+            "required": ["actions"],
             "additionalProperties": false,
         ]
     ),

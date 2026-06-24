@@ -46,6 +46,10 @@ extension SessionManager {
             return handleListApps()
         }
 
+        if tool == "batch" {
+            return executeBatch(params)
+        }
+
         var session: AppSession?
         var previousFrontmost: AppInfo?
 
