@@ -168,6 +168,22 @@ public final class RefetchableTree {
         return refetchElement(original)
     }
 
+    /// Liveness-driven refetch (US-038 / Inv 10). When a cheap AXRole probe on
+    /// the cached ref fails, the caller forces a re-walk + GraphLocator rebind
+    /// REGARDLESS of the invalidation flag — staleness truth is the dead ref, not
+    /// the monitor. Returns the rebound node, or a `.notFound`/ambiguous error
+    /// (the spine surfaces these as a stale-reference + tree refresh). Never
+    /// returns the original dead node.
+    public func refetchForLiveness(_ index: Int) -> RefetchResult {
+        if index < 0 || index >= nodesStorage.count {
+            return RefetchResult(
+                errorCode: .notFound,
+                errorMessage: "Index \(index) out of bounds (tree has \(nodesStorage.count) elements)"
+            )
+        }
+        return refetchElement(nodesStorage[index])
+    }
+
     /// Mirrors `_refetch_element`.
     private func refetchElement(_ original: Node) -> RefetchResult {
         let targetRole = original.axRole

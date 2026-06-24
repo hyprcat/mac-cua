@@ -244,6 +244,13 @@ public protocol AccessibilityProvider: AnyObject {
     func rangeForTextPosition(node: Node, x: Double, y: Double) -> TextRange?
     func visibleTextRange(node: Node) -> TextRange?
 
+    /// Liveness probe (US-038 / Inv 10): copy one cheap attribute (AXRole) on the
+    /// node's cached ref and report whether the element is still live. Used to
+    /// gate acting on a cached ref — a dead ref forces a re-walk + GraphLocator
+    /// rebind rather than acting on (or returning) a stale element. Read-only:
+    /// never focuses/raises/activates.
+    func isElementAlive(node: Node) -> Bool
+
     // Writes (pid-scoped, ref-counted assertions)
     func performAction(node: Node, action: String) throws
     func performActionOnRef(_ axRef: AXElementRef, action: String) throws
@@ -271,6 +278,11 @@ public extension AccessibilityProvider {
     func boundsForTextRange(node: Node, range: TextRange) -> Rect? { nil }
     func rangeForTextPosition(node: Node, x: Double, y: Double) -> TextRange? { nil }
     func visibleTextRange(node: Node) -> TextRange? { nil }
+
+    /// Default: assume-alive (fakes, Linux). Providers without a real AX layer
+    /// cannot probe liveness, so they never force a refetch. The real AXRole
+    /// probe lives in MacCUAKit.
+    func isElementAlive(node: Node) -> Bool { true }
 }
 
 // MARK: - InputProvider (input.py)

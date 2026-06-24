@@ -156,6 +156,10 @@ final class FakeAccessibility: AccessibilityProvider {
     }
     func getAttributeValue(_ element: AXElementRef, _ attr: String) -> String? { nil }
     func isAttributeSettable(node: Node, _ attr: String) -> Bool { true }
+    /// Liveness probe hook (US-038). Defaults to assume-alive; set to simulate a
+    /// dead cached ref and force the spine's re-walk + locator rebind.
+    var aliveForNode: ((Node) -> Bool)?
+    func isElementAlive(node: Node) -> Bool { aliveForNode?(node) ?? true }
     func performAction(node: Node, action: String) throws {
         if performActionThrows { throw AutomationError.ax("perform failed") }
         performed.append((action, node.index))

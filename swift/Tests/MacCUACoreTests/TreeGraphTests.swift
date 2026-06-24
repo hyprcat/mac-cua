@@ -195,6 +195,54 @@ final class TreeGraphTests_Refetch: XCTestCase {
     }
 }
 
+// MARK: - Liveness-driven refetch (US-038)
+
+final class TreeGraphTests_LivenessRefetch: XCTestCase {
+    /// A dead-ref liveness refetch re-walks + rebinds EVEN WHEN the monitor is
+    /// not invalidated (staleness truth is the dead ref, not the monitor) and
+    /// rebinds by locator, NOT the same preorder index.
+    func testRefetchForLivenessRewalksWhenNotInvalidated() {
+        let monitor = FakeMonitor()  // never notified → isInvalidated == false
+        // Tree mutated: the target ("Save") moved from index 0 to index 1.
+        let original = [node(0, label: "Save")]
+        let new = [node(0, label: "Help"), node(1, label: "Save")]
+        var walkCalls = 0
+        let tree = RefetchableTree(
+            nodes: original, monitor: monitor,
+            axWindow: FakeRef(), targetPid: 123,
+            walkFn: { _, _ in walkCalls += 1; return new }
+        )
+
+        XCTAssertFalse(tree.isInvalidated)
+        let result = tree.refetchForLiveness(0)
+        XCTAssertEqual(walkCalls, 1, "must re-walk regardless of invalidation flag")
+        XCTAssertTrue(result.success)
+        XCTAssertEqual(result.node?.label, "Save")
+        XCTAssertEqual(result.node?.index, 1, "rebound to the moved element, not index 0")
+    }
+
+    func testRefetchForLivenessNotFoundWhenElementGone() {
+        let monitor = FakeMonitor()
+        let original = [node(0, label: "Gone")]
+        let new = [node(0, label: "Other")]
+        let tree = RefetchableTree(
+            nodes: original, monitor: monitor,
+            axWindow: FakeRef(), targetPid: 123,
+            walkFn: { _, _ in new }
+        )
+        let result = tree.refetchForLiveness(0)
+        XCTAssertFalse(result.success)
+        XCTAssertEqual(result.errorCode, .notFound)
+    }
+
+    func testRefetchForLivenessOutOfBoundsReturnsNotFound() {
+        let tree = RefetchableTree(nodes: [node(0)], monitor: FakeMonitor())
+        let result = tree.refetchForLiveness(99)
+        XCTAssertFalse(result.success)
+        XCTAssertEqual(result.errorCode, .notFound)
+    }
+}
+
 // MARK: - update()
 
 final class TreeGraphTests_Update: XCTestCase {

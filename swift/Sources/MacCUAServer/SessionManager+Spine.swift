@@ -1383,7 +1383,9 @@ extension SessionManager {
 
         if let tree = session.refetchableTree {
             let result = tree.element(idx)
-            if result.success, let node = result.node { return node }
+            if result.success, let node = result.node {
+                return try livenessGated(session, idx, node)
+            }
             switch result.errorCode {
             case .notFound:
                 throw AutomationError.staleReference(
@@ -1403,7 +1405,32 @@ extension SessionManager {
                 "Index \(idx) out of bounds (tree has \(session.treeNodes.count) elements). "
                 + "Call get_app_state to refresh.")
         }
-        return session.treeNodes[idx]
+        return try livenessGated(session, idx, session.treeNodes[idx])
+    }
+
+    /// Liveness gate (US-038 / Inv 10): probe one cheap attribute (AXRole) on the
+    /// resolved node's cached ref. If the ref is dead, force a re-walk +
+    /// GraphLocator rebind via the RefetchableTree (NOT the same preorder index)
+    /// rather than returning/acting on a stale element. A dead ref with no
+    /// refetchable tree (or a refetch that finds nothing) surfaces as a
+    /// stale-reference error so the spine refreshes the tree. Read-only probe —
+    /// never focuses/raises/activates.
+    private func livenessGated(_ session: AppSession, _ idx: Int, _ node: Node) throws -> Node {
+        if providers.accessibility.isElementAlive(node: node) {
+            return node
+        }
+        if let tree = session.refetchableTree {
+            let result = tree.refetchForLiveness(idx)
+            if result.success, let rebound = result.node { return rebound }
+            if result.errorCode == .ambiguousBefore || result.errorCode == .ambiguousAfter {
+                throw AutomationError.refetch(
+                    result.errorMessage
+                    ?? "Element \(idx) is ambiguous after liveness refetch. Call get_app_state to refresh.")
+            }
+        }
+        throw AutomationError.staleReference(
+            "Element \(idx) reference is stale (liveness probe failed) and could not be rebound. "
+            + "Call get_app_state to refresh.")
     }
 
     // MARK: Error helpers

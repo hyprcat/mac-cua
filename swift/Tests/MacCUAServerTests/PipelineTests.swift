@@ -253,6 +253,63 @@ final class PipelineTests: XCTestCase {
         XCTAssertTrue(response.error?.contains("Tree refreshed") ?? false)
     }
 
+    /// US-038: when the cached ref is dead (liveness probe fails), resolveIndex
+    /// re-walks + rebinds via the RefetchableTree to the element's NEW position
+    /// rather than acting on the stale index-0 ref.
+    func testLivenessGateRebindsDeadRefToNewIndex() throws {
+        let ax = FakeAccessibility()
+        // The element the model targeted ("Save") moved from index 0 to index 1.
+        ax.aliveForNode = { $0.index != 0 }  // index-0 ref is dead; the rest live
+        let mgr = SessionManager(
+            providers: makeFakeProviders(apps: apps(), accessibility: ax, capture: capture()),
+            flags: flags())
+
+        let session = try mgr.resolveSession("get_app_state", ["window_id": windowId])
+        let original = [Node(index: 0, role: "button", label: "Save", depth: 1, axRef: FakeAXRef("x"))]
+        let rewalked = [
+            Node(index: 0, role: "button", label: "Help", depth: 1, axRef: FakeAXRef("x")),
+            Node(index: 1, role: "button", label: "Save", depth: 1, axRef: FakeAXRef("x")),
+        ]
+        let monitor = FakeSettleMonitor()
+        session.treeNodes = original
+        session.refetchableTree = RefetchableTree(
+            nodes: original, monitor: SettleInvalidationAdapter(monitor),
+            axWindow: FakeAXRef("x"), targetPid: pid, walkFn: { _, _ in rewalked })
+
+        _ = mgr.execute(
+            "set_value", ["window_id": windowId, "element_index": 0, "value": "x"])
+        // set_value acted on the rebound element (new index 1), NEVER the dead 0.
+        // (The fake's makeEditableText returns nil so verification can't confirm,
+        // but the recorded AX writes prove which element the spine targeted.)
+        XCTAssertFalse(ax.setAttributes.isEmpty, "the rebound element was acted on")
+        XCTAssertTrue(ax.setAttributes.allSatisfy { $0.2 == 1 },
+                      "every AX write targeted the rebound index 1, never the dead 0")
+    }
+
+    /// US-038: a dead ref that cannot be rebound (element gone after re-walk)
+    /// surfaces as a stale-reference + refreshed tree, never acts on the dead ref.
+    func testLivenessGateGoneElementSurfacesStale() throws {
+        let ax = FakeAccessibility()
+        ax.aliveForNode = { _ in false }
+        let mgr = SessionManager(
+            providers: makeFakeProviders(apps: apps(), accessibility: ax, capture: capture()),
+            flags: flags())
+
+        let session = try mgr.resolveSession("get_app_state", ["window_id": windowId])
+        let original = [Node(index: 0, role: "button", label: "Save", depth: 1, axRef: FakeAXRef("x"))]
+        let monitor = FakeSettleMonitor()
+        session.treeNodes = original
+        session.refetchableTree = RefetchableTree(
+            nodes: original, monitor: SettleInvalidationAdapter(monitor),
+            axWindow: FakeAXRef("x"), targetPid: pid, walkFn: { _, _ in [] })
+
+        let response = mgr.execute(
+            "set_value", ["window_id": windowId, "element_index": 0, "value": "x"])
+        XCTAssertNotNil(response.error)
+        XCTAssertTrue(response.error?.lowercased().contains("stale") ?? false)
+        XCTAssertTrue(ax.setAttributes.isEmpty, "never act on the dead ref")
+    }
+
     /// Ports test_cleanup_called_on_error: a generic AutomationError from dispatch
     /// still stops the interaction monitor (cleanup fires) and returns a snapshot
     /// + error rather than throwing.

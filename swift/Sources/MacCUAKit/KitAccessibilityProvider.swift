@@ -401,6 +401,24 @@ public final class KitAccessibilityProvider: AccessibilityProvider {
         return MacCUACore.TextRange(location: cf.location, length: cf.length)
     }
 
+    // MARK: Liveness probe (US-038, Inv 10)
+
+    /// Probe one cheap attribute (AXRole) on the node's cached ref to decide
+    /// whether the element is still live before acting on it. On any AX failure
+    /// — notably the stale-act codes -25202/-25204/-25205/-25212 — the element is
+    /// dead and the spine forces a re-walk + GraphLocator rebind. Read-only:
+    /// `AXUIElementCopyAttributeValue` never focuses/raises/activates (Inv 7).
+    public func isElementAlive(node: Node) -> Bool {
+        guard let el = axElement(node.axRef) else { return false }
+        var value: CFTypeRef?
+        let err = AXUIElementCopyAttributeValue(el, kAXRoleAttribute as CFString, &value)
+        let role = (value as? String)
+        // Treat any non-success status as dead; the stale-act codes are the
+        // expected ones, but a probe should fail closed on anything else too.
+        if err != .success { return false }
+        return AXStaleness.isAlive(status: 0, role: role)
+    }
+
     // MARK: Writes (US-036) — pure-AX actions + typed attribute sets
 
     /// Perform an AX action on a Node (ports `accessibility.perform_action`).

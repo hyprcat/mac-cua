@@ -537,7 +537,7 @@
         "Linux gate green (locator scoring already covered)"
       ],
       "priority": 39,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
