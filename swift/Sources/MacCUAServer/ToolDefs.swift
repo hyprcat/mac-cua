@@ -275,4 +275,31 @@ public var toolDefs: [ToolDef] {[
             "additionalProperties": false,
         ]
     ),
+    // Codex parity §D4 (US-009): explicit settle/wait. Drives the same
+    // event-driven DebounceStateMachine (via the SettleMonitor seam) that the
+    // action pipeline uses after every effect, then returns a fresh snapshot.
+    // Not in server.py — use it when an app is mid-animation/loading and you
+    // want to observe the settled UI without sending another action.
+    ToolDef(
+        name: "wait",
+        description: (
+            "Wait for the target app's UI to settle (animations/loading to "
+            + "quiesce) and return a fresh screenshot + accessibility-tree "
+            + "snapshot. Settling is event-driven, not a fixed sleep: it returns "
+            + "as soon as the UI goes quiet, or after the 'timeout' cap if it "
+            + "keeps changing. Target via window_id (preferred) or app."
+        ),
+        inputSchema: [
+            "type": "object",
+            "properties": [
+                "app": ["type": "string", "description": "App name or bundle identifier"],
+                "window_id": ["type": "integer", "description": "Target window ID from the latest get_app_state; preferred over app"],
+                "timeout": [
+                    "type": "number",
+                    "description": "Maximum seconds to wait for the UI to settle (default 2.0, capped at 10.0).",
+                ],
+            ],
+            "additionalProperties": false,
+        ]
+    ),
 ]}

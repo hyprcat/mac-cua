@@ -50,6 +50,10 @@ extension SessionManager {
             return executeBatch(params)
         }
 
+        if tool == "wait" {
+            return executeWait(params)
+        }
+
         var session: AppSession?
         var previousFrontmost: AppInfo?
 

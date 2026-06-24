@@ -261,10 +261,13 @@ final class FakeSettleMonitor: SettleMonitor {
     /// settle step ran (or was skipped) and with what budget (short-settle cap).
     private(set) var calls: [(context: String, timeout: Double, quietPeriod: Double)] = []
     private(set) var cancelled = false
+    /// What `waitForSettle` returns; tests flip this to `.timeout` to exercise
+    /// the "hit the cap" path.
+    var result: SettleResult = .settled
     func waitForSettle(context: String, timeout: Double, quietPeriod: Double) -> SettleResult {
         waits += 1
         calls.append((context, timeout, quietPeriod))
-        return .settled
+        return result
     }
     var isInvalidated: Bool { invalidated }
     func reset() { invalidated = false }
