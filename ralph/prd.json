@@ -209,7 +209,7 @@
         "Linux gate green (Core/Server swift build && swift test)"
       ],
       "priority": 15,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

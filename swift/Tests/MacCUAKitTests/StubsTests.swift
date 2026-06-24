@@ -27,9 +27,16 @@ final class StubsTests: XCTestCase {
         // Stubs must not act (Prime Invariant): the trivial-return bodies report
         // "nothing available / nothing happened", never foreground.
         XCTAssertTrue(KitAppResolver().listRunningApps().isEmpty)
-        XCTAssertFalse(KitAppResolver().checkAccessibilityPermission(prompt: true))
         XCTAssertEqual(KitSettleMonitor().waitForSettle(context: "t", timeout: 1, quietPeriod: 0.1), .noChange)
-        XCTAssertFalse(KitCaptureProvider().checkScreenRecordingPermission())
+    }
+
+    func testPermissionSeamsReturnWithoutCrashing() {
+        // US-015: the permission seams are now REAL (AXIsProcessTrustedWithOptions
+        // / CGPreflightScreenCaptureAccess). They must answer a Bool without
+        // prompting and without foregrounding. Value depends on the host's grant
+        // state, so we only assert the call returns. `prompt: false` = query only.
+        _ = KitAppResolver().checkAccessibilityPermission(prompt: false)
+        _ = KitCaptureProvider().checkScreenRecordingPermission()
     }
 }
 #endif

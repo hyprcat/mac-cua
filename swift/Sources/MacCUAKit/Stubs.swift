@@ -16,6 +16,8 @@
 import Foundation
 import MacCUACore
 import CSkyLightShim
+import ApplicationServices
+import CoreGraphics
 
 private func unimplemented(_ fn: String = #function) -> Never {
     fatalError("MacCUAKit.\(fn) is not implemented yet (US-014 stub)")
@@ -60,7 +62,17 @@ public final class KitAppResolver: AppResolver {
     public func getAXAppForPid(_ pid: Int, bundleId: String?) throws -> (axApp: AXElementRef, pid: Int) { unimplemented() }
     public func getFrontmostApp() -> AppInfo? { nil }
     public func restoreFrontmostApp(_ app: AppInfo?) {}
-    public func checkAccessibilityPermission(prompt: Bool) -> Bool { false }
+
+    /// Real Accessibility-trust check (US-015). `prompt: true` surfaces the
+    /// system Accessibility dialog (non-blocking); `false` just queries. Never
+    /// foregrounds — `AXIsProcessTrustedWithOptions` only reads/raises the
+    /// settings prompt.
+    public func checkAccessibilityPermission(prompt: Bool) -> Bool {
+        // `kAXTrustedCheckOptionPrompt` is a non-Sendable global under Swift 6
+        // strict concurrency; its documented value is the literal below.
+        let options = ["AXTrustedCheckOptionPrompt": prompt] as CFDictionary
+        return AXIsProcessTrustedWithOptions(options)
+    }
 }
 
 // MARK: - AccessibilityProvider (US-017/018/019/020/021)
@@ -117,8 +129,16 @@ public final class KitCaptureProvider: CaptureProvider {
     public func getWindowPid(windowId: Int) -> Int? { nil }
     public func findWindowIdForAXWindow(pid: Int, axWindow: AXElementRef) -> Int? { nil }
     public func captureWindow(windowId: Int, includeCursor: Bool) throws -> CapturedImage? { unimplemented() }
-    public func checkScreenRecordingPermission() -> Bool { false }
-    public func promptScreenRecordingPermission() -> Bool { false }
+    /// Real Screen-Recording preflight (US-015): query without prompting.
+    public func checkScreenRecordingPermission() -> Bool {
+        CGPreflightScreenCaptureAccess()
+    }
+
+    /// Real Screen-Recording request (US-015): surfaces the system dialog on
+    /// first use and returns whether access is granted. Non-foregrounding.
+    public func promptScreenRecordingPermission() -> Bool {
+        CGRequestScreenCaptureAccess()
+    }
 }
 
 // MARK: - SelectionProvider (US-040)
