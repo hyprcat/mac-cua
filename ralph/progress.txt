@@ -13,6 +13,7 @@ Started: (stamped on first ./ralph.sh run)
 - **Speed:** decompose each story and run Sonnet/Opus sub-agents in parallel (read Python / draft Swift / write tests / audit invariants).
 
 ## Manual-Verify Backlog
+- [US-034] On real macOS: a chord (Cmd-Shift-T) and a held key both register in a BACKGROUND window, NO foregrounding/activation, NO user modifier-state corruption (modifiers ride as flags, never discrete flagsChanged).
 (Mac-integration behaviors that compiled + fake-tested but still need a human real-app pass. Append `[US-0xx] <what to check>` as you complete Phase 3–6 stories.)
 - [US-033] On real macOS: typing emoji (incl. ZWJ family/flag) and accented text (é, ü) into a BACKGROUND window field renders correctly (one glyph per grapheme, no mojibake/split scalars) with NO foregrounding/activation and NO visible cursor move; plain ASCII + whitespace still land via the keycode path; shifted-punctuation types the right character.
 - [US-032] On real macOS: background click works on a web button (Chromium/Electron), a native Cocoa button, AND a menu item, all with NO foregrounding/activation and NO visible cursor move; the SkyLight window-stamped click path (now wired into `clickAt`) actually triggers web controls the plain CGEvent path misses; the window-local point fed to `deliverMouse` lands on the right control (top-left vs NSEvent bottom-left Y origin against window height); double/triple-click registers as a real multi-click; a SkyLight-mouse-unavailable host falls through to CGEvent with no crash/foreground.
@@ -366,4 +367,14 @@ Started: (stamped on first ./ralph.sh run)
 - Quality gate: `swift build` clean; `swift test` 683 passed / 0 fail (was 673).
 - MANUAL-VERIFY PENDING: On real macOS — typing emoji (incl. a ZWJ family/flag) and accented text (é, ü) into a BACKGROUND window field renders correctly (one glyph per grapheme, no mojibake, no split scalars) with NO foregrounding/activation and NO visible cursor move; the keycode path for plain ASCII + whitespace still lands; modifier-implied keys (e.g. shifted punctuation) type the right character.
 - Learnings: Swift `for ch in String` already iterates extended grapheme clusters, so per-grapheme delivery is free — the only work for C7 is making it Linux-testable by extracting the classify-each-grapheme decision into a pure Core planner (returns `[TypeStep]`) and unit-testing the emoji/keycode split there; the actual CGEvent post stays in Kit behind `#if os(macOS)`.
+---
+
+## US-034 — press_key: hold/interval timing preserved (D5)
+- New `MacCUACore/PressKeyPlan.swift`: pure, Linux-testable decomposition of a press_key request into an ordered `[TimedKeyEvent]` stream — keyDown/keyUp transitions carrying the modifier mask as flags (never a discrete flagsChanged case, so Inv 3 can't be violated on the postToPid path), each with its settle delay (holdDelay=0.008 between down/up, eventDelay=0.003 after). `resolveKeyName` ports the literal-space->"space" + coerceTextKey normalization; `plan(forSequence:)` preserves per-key interval timing for multi-key sequences.
+- Wired `KitInputProvider.pressKey` to drive the plan (replaces the inline parse + postKeycodeWithModifiers), replaying each transition + `Thread.sleep(forTimeInterval:)`.
+- New `Tests/MacCUACoreTests/PressKeyPlanTests.swift`: single-key down/up same-flags, hold/interval timing, Cmd-Shift-T chord (both masks on every transition, exactly 2 events — no flagsChanged), uppercase auto-shift, literal-space, unknown-key throws, sequence per-key interval.
+- Sub-agents used: none (small pure-helper story; done directly in main thread for reliability).
+- Quality gate: `swift build` clean, `swift test` 690 tests, 0 failures.
+- MANUAL-VERIFY PENDING: [US-034] On real macOS, a chord (e.g. Cmd-Shift-T) and a held key both register in a BACKGROUND window with NO foregrounding/activation and NO user modifier-state corruption (modifiers ride as flags, never leaked as discrete flagsChanged). Real-app behavior is unverified — compiled + fake-tested only.
+- Learnings: pressKey already worked single-combo; the story's value is the testable timing/flags plan. Mirrored the TypeTextPlan pattern (pure plan in Core, Kit replays it). KeyParser masks: maskShift=1<<17 … maskCommand=1<<20.
 ---

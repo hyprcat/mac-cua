@@ -359,18 +359,28 @@ public final class KitInputProvider: InputProvider {
     }
 
     public func pressKey(pid: Int, key: String, source: EventSource?) throws {
-        var resolvedKey = InputCoords.coerceTextKey(key)
-        if resolvedKey == " " { resolvedKey = "space" }
-        let keyName = resolvedKey ?? key
-
-        let parsed: (keycode: Int, mask: Int)
+        // Pure plan (US-034): per-key down/up + inter-key interval timing, with
+        // modifiers riding as flags — never discrete flagsChanged on postToPid
+        // (Invariant 3). Timing is replayed faithfully so chords and held keys
+        // both register.
+        let plan: [TimedKeyEvent]
         do {
-            parsed = try KeyParser.parseKeyCombo(keyName)
+            plan = try PressKeyPlan.plan(for: key)
         } catch {
             throw AutomationError.input(String(describing: error))
         }
-        try postKeycodeWithModifiers(pid: pid, keycode: parsed.keycode,
-                                     modifiers: parsed.mask, source: resolveSource(source))
+        let src = resolveSource(source)
+        for step in plan {
+            switch step.transition {
+            case let .down(keycode, flags):
+                try postKeyEvent(pid: pid, keycode: keycode, isDown: true,
+                                 flags: UInt64(flags), source: src)
+            case let .up(keycode, flags):
+                try postKeyEvent(pid: pid, keycode: keycode, isDown: false,
+                                 flags: UInt64(flags), source: src)
+            }
+            Thread.sleep(forTimeInterval: step.delayAfter)
+        }
     }
 
     public func typeText(pid: Int, text: String, source: EventSource?) throws {
