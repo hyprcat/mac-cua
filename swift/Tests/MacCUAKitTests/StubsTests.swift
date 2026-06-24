@@ -124,5 +124,40 @@ final class StubsTests: XCTestCase {
         XCTAssertNil(p.getWindowPid(windowId: -1))
         _ = p.listWindows(ownerPid: -1) // host-dependent count; must not crash
     }
+
+    // MARK: - US-028 InputProvider (CGEvent base)
+
+    func testInputEventSourceIsPrivatePerSession() {
+        // Each created source is an independent private CGEventSource (Inv 4);
+        // creating one never warps/foregrounds — it's a pure source allocation.
+        let p = KitInputProvider()
+        let a = p.createEventSource()
+        let b = p.createEventSource()
+        XCTAssertTrue(a is KitEventSource)
+        XCTAssertNotIdentical(a as AnyObject, b as AnyObject)
+    }
+
+    func testWindowToScreenCoordsBogusWindowIsNil() {
+        // Coordinate conversion needs live window bounds; a bogus id yields nil
+        // honestly — a read-only CGWindowList lookup, never foregrounds (Inv 7/13).
+        let p = KitInputProvider()
+        XCTAssertNil(p.windowToScreenCoords(windowId: -1, x: 10, y: 10, screenshotSize: nil))
+    }
+
+    func testClickOnUnresolvableWindowThrowsNeverForegrounds() {
+        // No window to resolve -> honest InputError; NO foregrounding fallback
+        // (Inv 18). Real background-click delivery is MANUAL-VERIFY on live apps.
+        let p = KitInputProvider()
+        XCTAssertThrowsError(
+            try p.clickAt(pid: -1, windowId: -1, x: 0, y: 0,
+                          button: "left", count: 1, screenshotSize: nil, source: nil))
+    }
+
+    func testClickRejectsUnknownButton() {
+        let p = KitInputProvider()
+        XCTAssertThrowsError(
+            try p.clickAtScreenPoint(pid: -1, x: 0, y: 0,
+                                     button: "wheel", count: 1, windowId: nil, source: nil))
+    }
 }
 #endif

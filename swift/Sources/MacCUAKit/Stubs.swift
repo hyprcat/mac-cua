@@ -33,10 +33,7 @@ public final class KitAXElementRef: AXElementRef {
     public init(_ element: AXUIElement? = nil) { self.element = element }
 }
 
-/// Real Kit handle wrapping a `CGEventSource` (US-028). Stub for now.
-public final class KitEventSource: EventSource {
-    public init() {}
-}
+// KitEventSource: real impl in KitInputProvider.swift (US-028).
 
 // KitCapturedImage: real impl in KitCaptureProvider.swift (US-022).
 
@@ -51,20 +48,7 @@ public final class KitEditableText: EditableText {
 
 // MARK: - AccessibilityProvider — real impl in KitAccessibilityProvider.swift (US-017)
 
-// MARK: - InputProvider (US-028 onward)
-
-public final class KitInputProvider: InputProvider {
-    public init() {}
-    public func createEventSource() -> EventSource { KitEventSource() }
-    public func clickAt(pid: Int, windowId: Int, x: Double, y: Double, button: String, count: Int, screenshotSize: (width: Int, height: Int)?, source: EventSource?) throws { unimplemented() }
-    public func clickAtScreenPoint(pid: Int, x: Double, y: Double, button: String, count: Int, windowId: Int?, source: EventSource?) throws { unimplemented() }
-    public func drag(pid: Int, windowId: Int, fromX: Double, fromY: Double, toX: Double, toY: Double, screenshotSize: (width: Int, height: Int)?, source: EventSource?) throws { unimplemented() }
-    public func pressKey(pid: Int, key: String, source: EventSource?) throws { unimplemented() }
-    public func typeText(pid: Int, text: String, source: EventSource?) throws { unimplemented() }
-    public func scrollPid(pid: Int, x: Double, y: Double, direction: String, clicks: Int, windowId: Int?, source: EventSource?) throws { unimplemented() }
-    public func scrollPidPixel(pid: Int, x: Double, y: Double, direction: String, pixels: Int, windowId: Int?, source: EventSource?) throws { unimplemented() }
-    public func windowToScreenCoords(windowId: Int, x: Double, y: Double, screenshotSize: (width: Int, height: Int)?) -> (x: Double, y: Double)? { nil }
-}
+// MARK: - InputProvider — real impl in KitInputProvider.swift (US-028)
 
 // MARK: - CaptureProvider (US-022/023/024)
 

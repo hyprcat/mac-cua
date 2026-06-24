@@ -1,0 +1,389 @@
+// KitInputProvider — the CGEvent base input path (US-028).
+//
+// This is the ALWAYS-AVAILABLE native delivery path, a faithful port of the
+// base (non-confirmed) functions in `app/_lib/input.py`. It obeys the Prime
+// Invariant by construction:
+//
+//   • Delivery is ONLY via `CGEvent.postToPid(_:)` — never `post(tap:)` / the
+//     global `CGEventPost`. (Inv 1)
+//   • The cursor is NEVER warped: there is no `CGWarpMouseCursorPosition` and no
+//     `kCGEventMouseMoved` pre-positioning (a posted mouse-move would leak to the
+//     visible cursor). The down/up events carry the target point directly; the
+//     `windowUnderMousePointer` field hints handle hit-test routing. (Inv 2)
+//   • Modifiers ride as flags on the key event (`CGEventSetFlags`), never as
+//     discrete `flagsChanged` via postToPid (which would corrupt the user's live
+//     modifier state). (Inv 3)
+//   • Each session uses a private `CGEventSource(stateID: .privateState)`. (Inv 4)
+//   • Scroll sets BOTH integer point deltas and fixed-point deltas so both
+//     Chromium and native Cocoa scroll. (Inv 6 — refined further in US-035.)
+//   • On failure these throw honestly; there is NO foregrounding fallback. (Inv 18)
+//
+// The branchy arithmetic (coordinate conversion, scroll deltas, button table,
+// text-key coercion) is the pure `MacCUACore.InputCoords` / `KeyParser`, unit-
+// tested on Linux. This file is the thin macOS CGEvent wiring.
+//
+// The SkyLight targeted-delivery path (US-030/031), the per-app delivery ordering
+// (US-032), Unicode per-grapheme typing (US-033), press-key timing (US-034), and
+// confirmed delivery (US-037) build on top of this base.
+
+#if os(macOS)
+import Foundation
+import CoreGraphics
+import MacCUACore
+
+/// Real per-session synthetic-event source: a private `CGEventSource`
+/// (`stateID == .privateState`, raw -1) so concurrent sessions never share HID
+/// state and the events are tagged for the delivery-confirmation tap (C5).
+public final class KitEventSource: EventSource {
+    let source: CGEventSource?
+    public init() {
+        self.source = CGEventSource(stateID: .privateState)
+    }
+    init(source: CGEventSource?) {
+        self.source = source
+    }
+}
+
+public final class KitInputProvider: InputProvider {
+    /// Module-level private source used when a call supplies no per-session
+    /// source (mirrors input.py's module `_source`).
+    private let defaultSource: CGEventSource?
+
+    /// Mouse event-number counter (input.py `_MouseEventCounter`). A monotonic
+    /// per-provider counter so down/up pairs carry increasing numbers; guarded by
+    /// a lock since the spine may post from different threads.
+    private let counterLock = NSLock()
+    private var mouseEventNumber: Int64 = 0
+
+    public init() {
+        self.defaultSource = CGEventSource(stateID: .privateState)
+    }
+
+    public func createEventSource() -> EventSource {
+        KitEventSource()
+    }
+
+    private func resolveSource(_ source: EventSource?) -> CGEventSource? {
+        if let kit = source as? KitEventSource { return kit.source }
+        return defaultSource
+    }
+
+    private func nextEventNumber() -> Int64 {
+        counterLock.lock()
+        defer { counterLock.unlock() }
+        mouseEventNumber += 1
+        return mouseEventNumber
+    }
+
+    // MARK: - Field helpers
+
+    private static func field(_ raw: UInt32) -> CGEventField {
+        CGEventField(rawValue: raw)!
+    }
+
+    // MARK: - Coordinate conversion
+
+    public func windowToScreenCoords(
+        windowId: Int, x: Double, y: Double,
+        screenshotSize: (width: Int, height: Int)?
+    ) -> (x: Double, y: Double)? {
+        guard let bounds = windowBounds(windowId: windowId) else { return nil }
+        return InputCoords.windowToScreenCoords(
+            windowBounds: bounds, x: x, y: y, screenshotSize: screenshotSize)
+    }
+
+    /// Read-only window-bounds lookup via `CGWindowListCopyWindowInfo`. Never
+    /// foregrounds (Inv 7/13) — it only reads the window-server snapshot.
+    private func windowBounds(windowId: Int) -> Rect? {
+        guard let cgWindowId = CGWindowID(exactly: windowId) else { return nil }
+        guard let infoList = CGWindowListCopyWindowInfo(
+            [.optionIncludingWindow], cgWindowId) as? [[String: Any]],
+              let info = infoList.first,
+              let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
+              let rect = CGRect(dictionaryRepresentation: boundsDict as CFDictionary)
+        else { return nil }
+        return Rect(x: Double(rect.origin.x), y: Double(rect.origin.y),
+                    w: Double(rect.size.width), h: Double(rect.size.height))
+    }
+
+    // MARK: - Mouse decoration
+
+    private func decorateMouseEvent(
+        _ event: CGEvent, windowId: Int?, pressure: Double,
+        clickState: Int64? = nil, eventNumber: Int64? = nil
+    ) {
+        if let clickState {
+            event.setIntegerValueField(
+                Self.field(CGEventFieldNumber.mouseEventClickState), value: clickState)
+        }
+        if let eventNumber {
+            event.setIntegerValueField(
+                Self.field(CGEventFieldNumber.mouseEventNumber), value: eventNumber)
+        }
+        event.setDoubleValueField(
+            Self.field(CGEventFieldNumber.mouseEventPressure), value: pressure)
+        if let windowId {
+            // Target = windowUnderMousePointer (+ ThatCanHandle) hint, NOT a warp.
+            event.setIntegerValueField(
+                Self.field(CGEventFieldNumber.mouseEventWindowUnderMousePointer),
+                value: Int64(windowId))
+            event.setIntegerValueField(
+                Self.field(CGEventFieldNumber.mouseEventWindowUnderMousePointerThatCanHandleThisEvent),
+                value: Int64(windowId))
+        }
+    }
+
+    private static let mousePressure: Double = 1.0
+
+    private func mouseEventTypes(for button: MouseButton) -> (down: CGEventType, up: CGEventType) {
+        switch button {
+        case .left: return (.leftMouseDown, .leftMouseUp)
+        case .right: return (.rightMouseDown, .rightMouseUp)
+        case .middle: return (.otherMouseDown, .otherMouseUp)
+        }
+    }
+
+    // MARK: - Click
+
+    private func postClick(
+        pid: Int, point: CGPoint, button: MouseButton, count: Int,
+        windowId: Int?, source: CGEventSource?
+    ) throws {
+        let (downType, upType) = mouseEventTypes(for: button)
+        let btn = CGMouseButton(rawValue: button.buttonNumber)!
+
+        for clickNum in 1...max(1, count) {
+            if clickNum > 1 { Thread.sleep(forTimeInterval: 0.1) }
+
+            guard let down = CGEvent(
+                mouseEventSource: source, mouseType: downType,
+                mouseCursorPosition: point, mouseButton: btn) else {
+                throw AutomationError.cgEvent("\(CGEventError.failedToCreate): mouseDown")
+            }
+            decorateMouseEvent(down, windowId: windowId, pressure: Self.mousePressure,
+                               clickState: Int64(clickNum), eventNumber: nextEventNumber())
+            down.postToPid(pid_t(pid))
+
+            Thread.sleep(forTimeInterval: 0.005)
+
+            guard let up = CGEvent(
+                mouseEventSource: source, mouseType: upType,
+                mouseCursorPosition: point, mouseButton: btn) else {
+                throw AutomationError.cgEvent("\(CGEventError.failedToCreate): mouseUp")
+            }
+            decorateMouseEvent(up, windowId: windowId, pressure: 0.0,
+                               clickState: Int64(clickNum), eventNumber: nextEventNumber())
+            up.postToPid(pid_t(pid))
+        }
+    }
+
+    public func clickAt(
+        pid: Int, windowId: Int, x: Double, y: Double,
+        button: String, count: Int,
+        screenshotSize: (width: Int, height: Int)?, source: EventSource?
+    ) throws {
+        guard let mb = MouseButton(name: button) else {
+            throw AutomationError.input("Unknown mouse button: \(button)")
+        }
+        guard let screen = windowToScreenCoords(
+            windowId: windowId, x: x, y: y, screenshotSize: screenshotSize) else {
+            throw AutomationError.input("Cannot resolve window \(windowId)")
+        }
+        try postClick(pid: pid, point: CGPoint(x: screen.x, y: screen.y),
+                      button: mb, count: count, windowId: windowId,
+                      source: resolveSource(source))
+    }
+
+    public func clickAtScreenPoint(
+        pid: Int, x: Double, y: Double, button: String, count: Int,
+        windowId: Int?, source: EventSource?
+    ) throws {
+        guard let mb = MouseButton(name: button) else {
+            throw AutomationError.input("Unknown mouse button: \(button)")
+        }
+        try postClick(pid: pid, point: CGPoint(x: x, y: y),
+                      button: mb, count: count, windowId: windowId,
+                      source: resolveSource(source))
+    }
+
+    // MARK: - Drag
+
+    public func drag(
+        pid: Int, windowId: Int,
+        fromX: Double, fromY: Double, toX: Double, toY: Double,
+        screenshotSize: (width: Int, height: Int)?, source: EventSource?
+    ) throws {
+        guard let from = windowToScreenCoords(
+                windowId: windowId, x: fromX, y: fromY, screenshotSize: screenshotSize),
+              let to = windowToScreenCoords(
+                windowId: windowId, x: toX, y: toY, screenshotSize: screenshotSize) else {
+            throw AutomationError.input("Cannot resolve window \(windowId)")
+        }
+        let src = resolveSource(source)
+        let btn = CGMouseButton.left
+
+        guard let down = CGEvent(
+            mouseEventSource: src, mouseType: .leftMouseDown,
+            mouseCursorPosition: CGPoint(x: from.x, y: from.y), mouseButton: btn) else {
+            throw AutomationError.cgEvent("\(CGEventError.failedToCreate): mouseDragged down")
+        }
+        decorateMouseEvent(down, windowId: windowId, pressure: Self.mousePressure)
+        down.postToPid(pid_t(pid))
+
+        Thread.sleep(forTimeInterval: 0.02)
+
+        let steps = 10
+        for i in 1...steps {
+            let t = Double(i) / Double(steps)
+            let ix = from.x + (to.x - from.x) * t
+            let iy = from.y + (to.y - from.y) * t
+            if let dragEvent = CGEvent(
+                mouseEventSource: src, mouseType: .leftMouseDragged,
+                mouseCursorPosition: CGPoint(x: ix, y: iy), mouseButton: btn) {
+                decorateMouseEvent(dragEvent, windowId: windowId, pressure: Self.mousePressure)
+                dragEvent.postToPid(pid_t(pid))
+            }
+            Thread.sleep(forTimeInterval: 0.005)
+        }
+
+        guard let up = CGEvent(
+            mouseEventSource: src, mouseType: .leftMouseUp,
+            mouseCursorPosition: CGPoint(x: to.x, y: to.y), mouseButton: btn) else {
+            throw AutomationError.cgEvent("\(CGEventError.failedToCreate): mouseDragged up")
+        }
+        decorateMouseEvent(up, windowId: windowId, pressure: 0.0)
+        up.postToPid(pid_t(pid))
+    }
+
+    // MARK: - Keyboard
+
+    private static let keyHoldDelay = 0.008
+    private static let keyEventDelay = 0.003
+
+    private func postKeyEvent(
+        pid: Int, keycode: Int, isDown: Bool, flags: UInt64, source: CGEventSource?
+    ) throws {
+        guard let event = CGEvent(
+            keyboardEventSource: source, virtualKey: CGKeyCode(keycode), keyDown: isDown) else {
+            throw AutomationError.cgEvent(
+                "\(CGEventError.failedToCreate): keycode=\(keycode), down=\(isDown)")
+        }
+        event.flags = CGEventFlags(rawValue: flags)
+        event.postToPid(pid_t(pid))
+    }
+
+    /// Send a keycode as compound keyDown/keyUp with modifiers embedded in the
+    /// flags — the safe postToPid path (Inv 3). Discrete `flagsChanged` is only
+    /// used on the SkyLight path (US-031).
+    private func postKeycodeWithModifiers(
+        pid: Int, keycode: Int, modifiers: Int, source: CGEventSource?
+    ) throws {
+        try postKeyEvent(pid: pid, keycode: keycode, isDown: true,
+                         flags: UInt64(modifiers), source: source)
+        Thread.sleep(forTimeInterval: Self.keyHoldDelay)
+        try postKeyEvent(pid: pid, keycode: keycode, isDown: false,
+                         flags: UInt64(modifiers), source: source)
+        Thread.sleep(forTimeInterval: Self.keyEventDelay)
+    }
+
+    private func postUnicodeChar(pid: Int, char: String, source: CGEventSource?) throws {
+        var utf16 = Array(char.utf16)
+        guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true) else {
+            throw AutomationError.cgEvent("\(CGEventError.failedToCreate): unicode down")
+        }
+        down.flags = []
+        down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
+        down.postToPid(pid_t(pid))
+
+        Thread.sleep(forTimeInterval: Self.keyHoldDelay)
+
+        guard let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
+            throw AutomationError.cgEvent("\(CGEventError.failedToCreate): unicode up")
+        }
+        up.flags = []
+        up.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
+        up.postToPid(pid_t(pid))
+
+        Thread.sleep(forTimeInterval: Self.keyEventDelay)
+    }
+
+    public func pressKey(pid: Int, key: String, source: EventSource?) throws {
+        var resolvedKey = InputCoords.coerceTextKey(key)
+        if resolvedKey == " " { resolvedKey = "space" }
+        let keyName = resolvedKey ?? key
+
+        let parsed: (keycode: Int, mask: Int)
+        do {
+            parsed = try KeyParser.parseKeyCombo(keyName)
+        } catch {
+            throw AutomationError.input(String(describing: error))
+        }
+        try postKeycodeWithModifiers(pid: pid, keycode: parsed.keycode,
+                                     modifiers: parsed.mask, source: resolveSource(source))
+    }
+
+    public func typeText(pid: Int, text: String, source: EventSource?) throws {
+        let src = resolveSource(source)
+        for ch in text {
+            var keyName = String(ch)
+            if ch == " " { keyName = "space" }
+            else if ch == "\n" || ch == "\r" { keyName = "return" }
+            else if ch == "\t" { keyName = "tab" }
+
+            if let parsed = try? KeyParser.parseKeyCombo(keyName) {
+                try postKeycodeWithModifiers(pid: pid, keycode: parsed.keycode,
+                                             modifiers: parsed.mask, source: src)
+            } else {
+                try postUnicodeChar(pid: pid, char: String(ch), source: src)
+            }
+            Thread.sleep(forTimeInterval: 0.005)
+        }
+    }
+
+    // MARK: - Scroll
+
+    private static let scrollStepDelay = 0.015
+
+    public func scrollPid(
+        pid: Int, x: Double, y: Double, direction: String, clicks: Int,
+        windowId: Int?, source: EventSource?
+    ) throws {
+        let src = resolveSource(source)
+        let (dy, dx) = InputCoords.lineScrollDeltas(direction: direction)
+        let n = max(1, clicks)
+        for i in 0..<n {
+            guard let scroll = CGEvent(
+                scrollWheelEvent2Source: src, units: .line, wheelCount: 2,
+                wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0) else {
+                throw AutomationError.cgEvent("CGEvent(scrollWheelEvent2Source:) returned NULL")
+            }
+            scroll.postToPid(pid_t(pid))
+            if i < n - 1 { Thread.sleep(forTimeInterval: Self.scrollStepDelay) }
+        }
+    }
+
+    public func scrollPidPixel(
+        pid: Int, x: Double, y: Double, direction: String, pixels: Int,
+        windowId: Int?, source: EventSource?
+    ) throws {
+        let src = resolveSource(source)
+        let (dy, dx) = InputCoords.pixelScrollDeltas(direction: direction, pixels: pixels)
+        guard let scroll = CGEvent(
+            scrollWheelEvent2Source: src, units: .pixel, wheelCount: 2,
+            wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0) else {
+            throw AutomationError.cgEvent("CGEvent(scrollWheelEvent2Source:) returned NULL")
+        }
+        // Integer point deltas — read by Chromium-based apps.
+        scroll.setIntegerValueField(
+            Self.field(CGEventFieldNumber.scrollWheelEventPointDeltaAxis1), value: Int64(dy))
+        scroll.setIntegerValueField(
+            Self.field(CGEventFieldNumber.scrollWheelEventPointDeltaAxis2), value: Int64(dx))
+        // Fixed-point deltas — read by native Cocoa apps.
+        scroll.setDoubleValueField(
+            Self.field(CGEventFieldNumber.scrollWheelEventFixedPtDeltaAxis1), value: Double(dy))
+        scroll.setDoubleValueField(
+            Self.field(CGEventFieldNumber.scrollWheelEventFixedPtDeltaAxis2), value: Double(dx))
+        scroll.postToPid(pid_t(pid))
+    }
+}
+#endif
