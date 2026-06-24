@@ -443,3 +443,18 @@ public protocol FrontmostTracking: AnyObject {
     func stop()
     func currentFrontmost() -> AppInfo?
 }
+
+/// Window z-order tracking (US-045). Polls `CGWindowListCopyWindowInfo` (no
+/// AXObserver — polling is the correctness gate, §5.3). Observe-and-report only —
+/// detecting a z-order change NEVER reorders/raises/foregrounds any window
+/// (Invariant 7/15). The Kit impl drives the pure `WindowOrderingState`
+/// (WindowOrdering.swift) in its poll loop.
+public protocol WindowOrderingTracking: AnyObject {
+    func start()
+    func stop()
+    /// Current best-known on-screen window order (CGWindowNumbers, front-to-back).
+    var currentOrder: [Int] { get }
+    /// Invoked once per detected z-order change with the new order. Set before
+    /// `start()`.
+    var onChange: (([Int]) -> Void)? { get set }
+}

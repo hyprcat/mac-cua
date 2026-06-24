@@ -111,11 +111,7 @@ public final class KitMenuTracker: MenuTracking {
     public func stop() {}
 }
 
-public final class KitFrontmostTracker: FrontmostTracking {
-    public init() {}
-    public func start() {}
-    public func stop() {}
-    public func currentFrontmost() -> AppInfo? { nil }
-}
+// KitFrontmostTracker + KitWindowOrderingObserver — real impls in
+// KitWindowOrderingObserver.swift (US-045).
 
 #endif
