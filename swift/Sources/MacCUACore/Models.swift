@@ -183,6 +183,59 @@ public struct AppState: Equatable, Sendable {
     }
 }
 
+// MARK: - Action-feedback packet (F)
+
+/// How a synthetic action was actually delivered to the target. After every
+/// action the model is told the path so it can reason about why an action did
+/// or did not land (e.g. an Electron control that only responds to a pointer
+/// path). All paths are background-only; none foregrounds (Prime Invariant).
+public enum DeliveryPath: String, Sendable, Equatable {
+    /// AX action (`AXPress`/`AXConfirm`/…) on the element.
+    case axPress = "AXPress"
+    /// SkyLight per-PID targeted delivery (`SLEventPostToPid`).
+    case skyLight = "SkyLight"
+    /// `CGEvent.postToPid` background delivery.
+    case cgEvent = "CGEvent"
+    /// `CGEventPostToPSN` to the owning process serial number.
+    case psn = "PSN"
+    /// Scroll-wheel delivery (CGEvent scroll-wheel).
+    case wheel = "wheel"
+}
+
+/// Per-action feedback returned to the model after every action (F). Carries the
+/// delivery path, the target window identity, the *logical* cursor position
+/// before/after (the BackgroundCursor's logical coordinate — the OS cursor never
+/// moves), and the tree-wide change summary (E3 / US-003) so the model can
+/// self-correct instead of flying blind. Real population is Phase 4 (US-039);
+/// this is the pure shape + its renderer.
+public struct ActionFeedback: Sendable, Equatable {
+    public var deliveryPath: DeliveryPath
+    public var windowId: Int?
+    public var windowTitle: String?
+    /// Logical cursor position before the action (logical, not OS cursor).
+    public var cursorBefore: Point?
+    /// Logical cursor position after the action.
+    public var cursorAfter: Point?
+    /// Tree-wide pre/post change summary (US-003); `nil` when not computed.
+    public var changeSummary: ChangeSummary?
+
+    public init(
+        deliveryPath: DeliveryPath,
+        windowId: Int? = nil,
+        windowTitle: String? = nil,
+        cursorBefore: Point? = nil,
+        cursorAfter: Point? = nil,
+        changeSummary: ChangeSummary? = nil
+    ) {
+        self.deliveryPath = deliveryPath
+        self.windowId = windowId
+        self.windowTitle = windowTitle
+        self.cursorBefore = cursorBefore
+        self.cursorAfter = cursorAfter
+        self.changeSummary = changeSummary
+    }
+}
+
 /// The full result of a tool call, assembled into MCP content downstream.
 public struct ToolResponse {
     public var app: String
@@ -198,6 +251,9 @@ public struct ToolResponse {
     public var guidance: String?
     public var appState: AppState?
     public var systemSelection: String?
+    /// Per-action feedback (F / US-011). Present on action responses; `nil` for
+    /// read-only tools (`list_apps`, `get_app_state`, `wait`).
+    public var actionFeedback: ActionFeedback?
 
     public init(
         app: String,
@@ -212,7 +268,8 @@ public struct ToolResponse {
         error: String? = nil,
         guidance: String? = nil,
         appState: AppState? = nil,
-        systemSelection: String? = nil
+        systemSelection: String? = nil,
+        actionFeedback: ActionFeedback? = nil
     ) {
         self.app = app
         self.pid = pid
@@ -227,6 +284,7 @@ public struct ToolResponse {
         self.guidance = guidance
         self.appState = appState
         self.systemSelection = systemSelection
+        self.actionFeedback = actionFeedback
     }
 }
 

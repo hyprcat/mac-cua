@@ -175,6 +175,80 @@ final class ServerLayerTests: XCTestCase {
         if case .image = blocks[0] { XCTFail("should not emit image block") }
     }
 
+    // MARK: - Action-feedback packet (F / US-011)
+
+    func testActionFeedbackRenderedInFullPath() {
+        let fb = ActionFeedback(
+            deliveryPath: .skyLight,
+            windowId: 4242,
+            windowTitle: "Inbox",
+            cursorBefore: Point(x: 10, y: 20),
+            cursorAfter: Point(x: 100.5, y: 200),
+            changeSummary: ChangeSummary(added: ["a", "b"], removed: ["c"], changed: [])
+        )
+        let resp = ToolResponse(
+            app: "Mail", pid: 1, snapshotId: 1,
+            treeText: "Window: Mail\n\n[0] button \"Send\"",
+            result: "Clicked element 0.",
+            actionFeedback: fb
+        )
+        guard case let .text(text) = formatMCP(resp)[0] else { return XCTFail() }
+        XCTAssertTrue(text.contains("<action_feedback>"))
+        XCTAssertTrue(text.contains("</action_feedback>"))
+        XCTAssertTrue(text.contains("delivery_path: SkyLight"))
+        XCTAssertTrue(text.contains("window: 4242 \"Inbox\""))
+        XCTAssertTrue(text.contains("cursor_before: (10, 20)"))
+        XCTAssertTrue(text.contains("cursor_after: (100.5, 200)"))
+        XCTAssertTrue(text.contains("change_summary: +2 -1 ~0"))
+        // Feedback comes after the result, before the <app_state> wrapper.
+        let resultIdx = text.range(of: "Clicked element 0.")!.lowerBound
+        let fbIdx = text.range(of: "<action_feedback>")!.lowerBound
+        let stateIdx = text.range(of: "<app_state>")!.lowerBound
+        XCTAssertTrue(resultIdx < fbIdx)
+        XCTAssertTrue(fbIdx < stateIdx)
+    }
+
+    func testActionFeedbackRenderedInNoTreePath() {
+        let resp = ToolResponse(
+            app: "X", pid: 1, snapshotId: 1,
+            treeText: nil,
+            result: "ok",
+            actionFeedback: ActionFeedback(deliveryPath: .cgEvent)
+        )
+        let blocks = formatMCP(resp)
+        XCTAssertEqual(blocks.count, 2)
+        XCTAssertEqual(blocks[0], .text("ok"))
+        guard case let .text(fbText) = blocks[1] else { return XCTFail() }
+        XCTAssertTrue(fbText.contains("delivery_path: CGEvent"))
+    }
+
+    func testActionFeedbackMinimalOnlyDeliveryPath() {
+        let resp = ToolResponse(
+            app: "X", pid: 1, snapshotId: 1, treeText: "tree",
+            actionFeedback: ActionFeedback(deliveryPath: .wheel)
+        )
+        guard case let .text(text) = formatMCP(resp)[0] else { return XCTFail() }
+        XCTAssertTrue(text.contains("delivery_path: wheel"))
+        // No window / cursor / summary lines when those fields are nil.
+        XCTAssertFalse(text.contains("window:"))
+        XCTAssertFalse(text.contains("cursor_before:"))
+        XCTAssertFalse(text.contains("change_summary:"))
+    }
+
+    func testNoActionFeedbackOmitsBlock() {
+        let resp = ToolResponse(app: "X", pid: 1, snapshotId: 1, treeText: "tree", result: "ok")
+        guard case let .text(text) = formatMCP(resp)[0] else { return XCTFail() }
+        XCTAssertFalse(text.contains("<action_feedback>"))
+    }
+
+    func testActionFeedbackDeliveryPathRawValues() {
+        XCTAssertEqual(DeliveryPath.axPress.rawValue, "AXPress")
+        XCTAssertEqual(DeliveryPath.skyLight.rawValue, "SkyLight")
+        XCTAssertEqual(DeliveryPath.cgEvent.rawValue, "CGEvent")
+        XCTAssertEqual(DeliveryPath.psn.rawValue, "PSN")
+        XCTAssertEqual(DeliveryPath.wheel.rawValue, "wheel")
+    }
+
     // MARK: - PermissionsGate
 
     func testGateReturnsPendingUntilBothGrantedThenNil() {

@@ -18,6 +18,43 @@ import MacCUACore
 // only assembles already-safe strings and copies `response.screenshot` (base64)
 // verbatim. We add nothing that could leak a reference.
 
+/// Render the action-feedback packet (F / US-011) into a `<action_feedback>`
+/// block the model reads after every action. Reports the delivery path, the
+/// target window identity, the logical cursor before/after, and the tree change
+/// summary as *counts* — never the raw stable keys (Invariant 8 / US-012: no
+/// graph-locator string is serializable into the model packet).
+func renderActionFeedback(_ fb: ActionFeedback) -> String {
+    var lines: [String] = []
+    lines.append("delivery_path: \(fb.deliveryPath.rawValue)")
+    if let id = fb.windowId {
+        let title = fb.windowTitle ?? ""
+        lines.append("window: \(id)\(title.isEmpty ? "" : " \"\(title)\"")")
+    } else if let title = fb.windowTitle, !title.isEmpty {
+        lines.append("window: \"\(title)\"")
+    }
+    func fmt(_ p: Point) -> String {
+        "(\(formatCoord(p.x)), \(formatCoord(p.y)))"
+    }
+    if let before = fb.cursorBefore {
+        lines.append("cursor_before: \(fmt(before))")
+    }
+    if let after = fb.cursorAfter {
+        lines.append("cursor_after: \(fmt(after))")
+    }
+    if let summary = fb.changeSummary {
+        lines.append(
+            "change_summary: +\(summary.added.count) -\(summary.removed.count) ~\(summary.changed.count)"
+        )
+    }
+    return "<action_feedback>\n\(lines.joined(separator: "\n"))\n</action_feedback>"
+}
+
+/// Compact coordinate rendering: drop a trailing `.0` so whole numbers read
+/// cleanly, otherwise keep the value.
+private func formatCoord(_ v: Double) -> String {
+    v == v.rounded() ? String(Int(v)) : String(v)
+}
+
 /// Render a `ToolResponse` into MCP content blocks. Mirrors `format_mcp`.
 public func formatMCP(_ response: ToolResponse) -> [MCPContent] {
     var blocks: [MCPContent] = []
@@ -29,6 +66,9 @@ public func formatMCP(_ response: ToolResponse) -> [MCPContent] {
         }
         if let error = response.error, !error.isEmpty {
             blocks.append(.text(error))
+        }
+        if let fb = response.actionFeedback {
+            blocks.append(.text(renderActionFeedback(fb)))
         }
         return blocks
     }
@@ -43,6 +83,9 @@ public func formatMCP(_ response: ToolResponse) -> [MCPContent] {
     }
     if let error = response.error, !error.isEmpty {
         parts.append(error)
+    }
+    if let fb = response.actionFeedback {
+        parts.append(renderActionFeedback(fb))
     }
 
     var appStateParts: [String] = [treeText]
