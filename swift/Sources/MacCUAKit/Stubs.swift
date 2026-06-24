@@ -25,9 +25,12 @@ private func unimplemented(_ fn: String = #function) -> Never {
 
 // MARK: - Opaque platform seams
 
-/// Real Kit handle wrapping an `AXUIElement` (US-017). Stub for now.
+/// Real Kit handle wrapping an `AXUIElement`. US-016 populates the application
+/// element (via `AXUIElementCreateApplication`); US-017 fleshes out the rest of
+/// the walker around the same wrapper.
 public final class KitAXElementRef: AXElementRef {
-    public init() {}
+    public let element: AXUIElement?
+    public init(_ element: AXUIElement? = nil) { self.element = element }
 }
 
 /// Real Kit handle wrapping a `CGEventSource` (US-028). Stub for now.
@@ -49,31 +52,7 @@ public final class KitEditableText: EditableText {
     public func insertText(_ text: String) throws { unimplemented() }
 }
 
-// MARK: - AppResolver (US-016)
-
-public final class KitAppResolver: AppResolver {
-    public init() {}
-    public func listRunningApps() -> [AppInfo] { [] }
-    public func listRecentApps() -> [AppInfo] { [] }
-    public func resolveApp(_ hint: String) throws -> AppInfo { unimplemented() }
-    public func resolveRunningAppByPid(_ pid: Int) -> AppInfo? { nil }
-    public func launchApp(bundleId: String) throws -> Int { unimplemented() }
-    public func getAXApp(bundleId: String, knownPid: Int?) throws -> (axApp: AXElementRef, pid: Int) { unimplemented() }
-    public func getAXAppForPid(_ pid: Int, bundleId: String?) throws -> (axApp: AXElementRef, pid: Int) { unimplemented() }
-    public func getFrontmostApp() -> AppInfo? { nil }
-    public func restoreFrontmostApp(_ app: AppInfo?) {}
-
-    /// Real Accessibility-trust check (US-015). `prompt: true` surfaces the
-    /// system Accessibility dialog (non-blocking); `false` just queries. Never
-    /// foregrounds — `AXIsProcessTrustedWithOptions` only reads/raises the
-    /// settings prompt.
-    public func checkAccessibilityPermission(prompt: Bool) -> Bool {
-        // `kAXTrustedCheckOptionPrompt` is a non-Sendable global under Swift 6
-        // strict concurrency; its documented value is the literal below.
-        let options = ["AXTrustedCheckOptionPrompt": prompt] as CFDictionary
-        return AXIsProcessTrustedWithOptions(options)
-    }
-}
+// MARK: - AppResolver (real impl lives in KitAppResolver.swift, US-016)
 
 // MARK: - AccessibilityProvider (US-017/018/019/020/021)
 

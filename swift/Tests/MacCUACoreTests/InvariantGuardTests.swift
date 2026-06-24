@@ -104,7 +104,16 @@ final class InvariantGuardTests: XCTestCase {
             }),
             ("post(tap:)", { $0.contains("post(tap:") }),
             ("CGWarpMouseCursorPosition", { $0.contains("CGWarpMouseCursorPosition") }),
-            ("NSRunningApplication.activate / .activate(", { $0.contains(".activate(") }),
+            ("NSRunningApplication.activate / .activate(", { line in
+                guard line.contains(".activate(") else { return false }
+                // Invariant 15 sanctions EXACTLY ONE activation: restoring the
+                // user's previously-frontmost app (apps.py `restore_frontmost`).
+                // That single call site marks itself with the receiver name
+                // `sanctionedFrontmostRestore` — an identifier that survives
+                // comment/string stripping — so this narrow allowance cannot be
+                // reused to foreground a driven app.
+                return !line.contains("sanctionedFrontmostRestore.activate(")
+            }),
             ("AXRaise (call)", { $0.contains("AXRaise") }),
             ("SetFrontmost", { $0.contains("SetFrontmost") }),
             ("SLPSSetFrontProcessWithOptions", { $0.contains("SLPSSetFrontProcessWithOptions") }),

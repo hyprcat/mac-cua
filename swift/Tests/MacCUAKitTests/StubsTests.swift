@@ -24,10 +24,32 @@ final class StubsTests: XCTestCase {
     }
 
     func testNonActingStubDefaultsAreInert() {
-        // Stubs must not act (Prime Invariant): the trivial-return bodies report
-        // "nothing available / nothing happened", never foreground.
-        XCTAssertTrue(KitAppResolver().listRunningApps().isEmpty)
+        // Remaining stubs must not act (Prime Invariant): the trivial-return
+        // bodies report "nothing happened", never foreground.
         XCTAssertEqual(KitSettleMonitor().waitForSettle(context: "t", timeout: 1, quietPeriod: 0.1), .noChange)
+    }
+
+    func testAppResolverListIsReadOnlyAndWellFormed() {
+        // US-016: listRunningApps is a pure read via NSWorkspace — never
+        // foregrounds. The harness host always has at least one regular GUI app
+        // running; every entry must carry a bundle id and a live pid.
+        let apps = KitAppResolver().listRunningApps()
+        for a in apps {
+            XCTAssertFalse(a.bundleId.isEmpty)
+            XCTAssertTrue(a.running)
+            XCTAssertNotNil(a.pid)
+        }
+    }
+
+    func testResolveUnknownAppThrows() {
+        // A nonsense hint that is neither running nor an installable bundle id
+        // must fail honestly rather than launch/foreground anything.
+        XCTAssertThrowsError(try KitAppResolver().resolveApp("zz-no-such-app-zz"))
+    }
+
+    func testRestoreFrontmostNilIsNoOp() {
+        // Restoring nil must do nothing (no activation).
+        KitAppResolver().restoreFrontmostApp(nil)
     }
 
     func testPermissionSeamsReturnWithoutCrashing() {
