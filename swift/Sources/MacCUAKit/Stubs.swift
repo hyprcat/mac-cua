@@ -109,14 +109,7 @@ public final class KitClipboardProvider: ClipboardProvider {
 
 // MARK: - SettleMonitor — real impl in KitRunLoop.swift (US-025)
 
-// MARK: - OutcomeMonitor (US-037)
-
-public final class KitOutcomeMonitor: OutcomeMonitor {
-    public init() {}
-    public func mark() -> Int { 0 }
-    public func verifyAX(contract: VerificationContract, mark: Int?, timeout: Double) -> ActionVerificationResult { .timeout }
-    public func verifyTransport(startSequence: Int, timeout: Double) -> Bool { false }
-}
+// MARK: - OutcomeMonitor — real impl in KitOutcomeMonitor.swift (US-037)
 
 // MARK: - Focus / interruption services (US-044/045)
 

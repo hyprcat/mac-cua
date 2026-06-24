@@ -524,7 +524,7 @@
         "Linux gate green (verdict logic already covered)"
       ],
       "priority": 38,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
