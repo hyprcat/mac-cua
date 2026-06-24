@@ -423,6 +423,14 @@ public final class BackgroundCursor: VirtualCursor {
         ghost?.move(windowId: windowId, to: position, animated: animated)
     }
 
+    /// Move the logical cursor to the click point, then trigger the decorative
+    /// click ripple on the ghost — the single chokepoint for click animations
+    /// (US-054). Logical only: the OS cursor never moves.
+    private func setPositionAndPulse(_ position: Point) {
+        setPosition(position, animated: false)
+        ghost?.pulse(windowId: windowId)
+    }
+
     public var positionInScaledCoordinates: Point {
         Point(x: _position.x / scaleFactor, y: _position.y / scaleFactor)
     }
@@ -441,7 +449,7 @@ public final class BackgroundCursor: VirtualCursor {
 
     /// Click via the delivery seam. Mirrors `click_at`.
     public func clickAt(_ position: Point) {
-        setPosition(position, animated: false)
+        setPositionAndPulse(position)
         delivery?.clickAt(pid: pid, windowId: windowId,
                           x: position.x, y: position.y,
                           button: .left, count: 1,
@@ -450,7 +458,7 @@ public final class BackgroundCursor: VirtualCursor {
 
     /// Double-click via the delivery seam. Mirrors `double_click_at`.
     public func doubleClickAt(_ position: Point) {
-        setPosition(position, animated: false)
+        setPositionAndPulse(position)
         delivery?.clickAt(pid: pid, windowId: windowId,
                           x: position.x, y: position.y,
                           button: .left, count: 2,
@@ -459,7 +467,7 @@ public final class BackgroundCursor: VirtualCursor {
 
     /// Right-click via the delivery seam. Mirrors `right_click_at`.
     public func rightClickAt(_ position: Point) {
-        setPosition(position, animated: false)
+        setPositionAndPulse(position)
         delivery?.clickAt(pid: pid, windowId: windowId,
                           x: position.x, y: position.y,
                           button: .right, count: 1,

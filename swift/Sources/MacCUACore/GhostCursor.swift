@@ -66,13 +66,98 @@ public protocol GhostCursorOverlay: AnyObject {
     func hide(windowId: Int)
     /// Tear down the ghost for a window (session teardown).
     func remove(windowId: Int)
+    // US-054 decorative animations (default no-op so existing fakes keep building).
+    /// Play a one-shot click ripple/pulse on the sprite at its current position.
+    func pulse(windowId: Int)
+    /// Briefly outline an element's bounds inside the window (CG-global rect).
+    func highlight(windowId: Int, bounds: Rect)
+    /// Start/stop the idle thinking wiggle on the sprite.
+    func setThinking(windowId: Int, active: Bool)
+}
+
+public extension GhostCursorOverlay {
+    func pulse(windowId: Int) {}
+    func highlight(windowId: Int, bounds: Rect) {}
+    func setThinking(windowId: Int, active: Bool) {}
+}
+
+// ---------------------------------------------------------------------------
+// US-054 — Ghost cursor animations (§7.3): pure animation geometry/params
+// ---------------------------------------------------------------------------
+//
+// The *timing* and *shape* of every decorative animation is pure math so it can
+// be unit-tested on Linux; the AppKit overlay (MacCUAKit) only translates these
+// values into Core Animation objects. Nothing here touches the OS cursor.
+
+/// Tunable durations/magnitudes shared by Core (tests) and the AppKit overlay.
+public enum GhostAnimationParams {
+    /// Bezier "scoot" duration when `moveTo(animated: true)`.
+    public static let scootDuration: Double = 0.18
+    /// Click ripple duration.
+    public static let pulseDuration: Double = 0.35
+    /// Peak sprite scale at the apex of a click pulse.
+    public static let pulseMaxScale: Double = 1.9
+    /// Idle wiggle period (one full back-and-forth).
+    public static let wigglePeriod: Double = 0.6
+    /// Idle wiggle peak rotation, radians.
+    public static let wiggleAmplitude: Double = 0.12
+    /// Element-bounds highlight fade duration.
+    public static let highlightDuration: Double = 0.6
+}
+
+/// Pure animation geometry helpers (Linux-tested).
+public enum GhostAnimationGeometry {
+    /// Two cubic-bezier control points for a gentle arced "scoot" from `a` to `b`.
+    /// The controls sit at 1/3 and 2/3 along the segment, pushed perpendicular by
+    /// a fraction of the travel distance so the path bows rather than going
+    /// dead-straight. A zero-length move returns both controls at `a` (no arc).
+    public static func scootControlPoints(from a: Point, to b: Point,
+                                          bow: Double = 0.18) -> (c1: Point, c2: Point) {
+        let dx = b.x - a.x
+        let dy = b.y - a.y
+        let dist = (dx * dx + dy * dy).squareRoot()
+        if dist == 0 { return (a, a) }
+        // Unit perpendicular to the travel direction.
+        let px = -dy / dist
+        let py = dx / dist
+        let offset = dist * bow
+        let p1 = Point(x: a.x + dx / 3.0, y: a.y + dy / 3.0)
+        let p2 = Point(x: a.x + dx * 2.0 / 3.0, y: a.y + dy * 2.0 / 3.0)
+        return (Point(x: p1.x + px * offset, y: p1.y + py * offset),
+                Point(x: p2.x + px * offset, y: p2.y + py * offset))
+    }
+
+    /// Rotation (radians) of the idle wiggle at phase `t` (seconds), a sine wave
+    /// of `wiggleAmplitude` and period `wigglePeriod`. Pure/deterministic.
+    public static func wiggleRotation(atPhase t: Double) -> Double {
+        let twoPi = 2.0 * Double.pi
+        return GhostAnimationParams.wiggleAmplitude
+            * sin(twoPi * t / GhostAnimationParams.wigglePeriod)
+    }
 }
 
 /// The single chokepoint a `BackgroundCursor` drives on every logical move.
 /// `GhostCursorController` conforms; `BackgroundCursor` holds a `weak` reference
 /// so the controller's per-window registry never keeps a session alive.
+///
+/// US-054 adds the decorative animation hooks (`pulse`/`highlight`/`setThinking`)
+/// alongside the move chokepoint. They have default no-op extension impls so
+/// existing conformers/mocks keep compiling; the real animations are driven off
+/// `BackgroundCursor` position/click changes (still the single chokepoint).
 public protocol GhostCursorDriving: AnyObject {
     func move(windowId: Int, to point: Point, animated: Bool)
+    /// A click happened at the current logical position → ripple/pulse the sprite.
+    func pulse(windowId: Int)
+    /// Briefly outline an element's screen bounds (CG-global rect) — decorative.
+    func highlight(windowId: Int, bounds: Rect)
+    /// Toggle the idle "thinking" wiggle while the agent deliberates.
+    func setThinking(windowId: Int, active: Bool)
+}
+
+public extension GhostCursorDriving {
+    func pulse(windowId: Int) {}
+    func highlight(windowId: Int, bounds: Rect) {}
+    func setThinking(windowId: Int, active: Bool) {}
 }
 
 /// Pure ghost-cursor geometry helpers (Linux-testable). The overlay receives
@@ -243,6 +328,33 @@ public final class GhostCursorController: GhostCursorDriving {
     public func move(windowId: Int, to point: Point, animated: Bool = false) {
         let clamped = frames[windowId].map { GhostCursorController.clampPointToWindow(point, $0) } ?? point
         overlay?.move(windowId: windowId, to: clamped, animated: animated)
+    }
+
+    /// Click ripple at the sprite's current position (the `clickAt` chokepoint).
+    public func pulse(windowId: Int) {
+        overlay?.pulse(windowId: windowId)
+    }
+
+    /// Briefly outline an element's CG-global bounds (clamped to the window frame
+    /// so the highlight can never paint outside the driven window).
+    public func highlight(windowId: Int, bounds: Rect) {
+        let clamped = frames[windowId].map { GhostCursorController.clampRectToWindow(bounds, $0) } ?? bounds
+        overlay?.highlight(windowId: windowId, bounds: clamped)
+    }
+
+    /// Toggle the idle thinking wiggle.
+    public func setThinking(windowId: Int, active: Bool) {
+        overlay?.setThinking(windowId: windowId, active: active)
+    }
+
+    /// Clamp a CG-global rect so it lies entirely within a window frame. Pure.
+    public static func clampRectToWindow(_ rect: Rect, _ frame: Rect) -> Rect {
+        if frame.w <= 0 || frame.h <= 0 { return rect }
+        let x0 = min(max(rect.x, frame.x), frame.x + frame.w)
+        let y0 = min(max(rect.y, frame.y), frame.y + frame.h)
+        let x1 = min(max(rect.x + rect.w, frame.x), frame.x + frame.w)
+        let y1 = min(max(rect.y + rect.h, frame.y), frame.y + frame.h)
+        return Rect(x: x0, y: y0, w: x1 - x0, h: y1 - y0)
     }
 
     /// Apply an edge-triggered `GhostWindowTrackingState` action to the overlay

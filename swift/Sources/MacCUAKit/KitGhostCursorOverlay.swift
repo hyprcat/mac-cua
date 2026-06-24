@@ -33,10 +33,19 @@ public final class KitGhostCursorOverlay: GhostCursorOverlay {
     private final class Entry {
         let panel: NSPanel
         let sprite: CALayer
+        /// Reusable click-ripple ring (kept at opacity 0 between pulses → no
+        /// per-click layer churn / no cross-isolation layer capture).
+        let ripple: CALayer
+        /// Reusable element-highlight outline (opacity 0 when idle).
+        let highlightLayer: CALayer
         var windowCGRect: Rect
-        init(panel: NSPanel, sprite: CALayer, windowCGRect: Rect) {
+        var thinking = false
+        init(panel: NSPanel, sprite: CALayer, ripple: CALayer,
+             highlightLayer: CALayer, windowCGRect: Rect) {
             self.panel = panel
             self.sprite = sprite
+            self.ripple = ripple
+            self.highlightLayer = highlightLayer
             self.windowCGRect = windowCGRect
         }
     }
@@ -77,11 +86,99 @@ public final class KitGhostCursorOverlay: GhostCursorOverlay {
             let clamped = GhostCursorController.clampPointToWindow(point, entry.windowCGRect)
             let local = GhostCursorGeometry.spritePointInPanel(screenPoint: clamped,
                                                                windowCGRect: entry.windowCGRect)
-            // Decorative move: reposition the sprite layer only — no cursor warp.
+            let target = CGPoint(x: local.x, y: local.y)
+            let from = entry.sprite.position
+            if animated && (from.x >= 0 || from.y >= 0) {
+                // Bezier "scoot": arc the sprite to the target via Core Animation
+                // keyframe path. Control points come from the pure Core geometry.
+                let (c1, c2) = GhostAnimationGeometry.scootControlPoints(
+                    from: Point(x: Double(from.x), y: Double(from.y)),
+                    to: Point(x: Double(target.x), y: Double(target.y)))
+                let path = CGMutablePath()
+                path.move(to: from)
+                path.addCurve(to: target,
+                              control1: CGPoint(x: c1.x, y: c1.y),
+                              control2: CGPoint(x: c2.x, y: c2.y))
+                let anim = CAKeyframeAnimation(keyPath: "position")
+                anim.path = path
+                anim.duration = GhostAnimationParams.scootDuration
+                anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                entry.sprite.position = target          // commit final value first
+                entry.sprite.add(anim, forKey: "scoot")
+            } else {
+                // Decorative move: reposition the sprite layer only — no cursor warp.
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                entry.sprite.position = target
+                CATransaction.commit()
+            }
+        }
+    }
+
+    public func pulse(windowId: Int) {
+        onMain {
+            guard let entry = self.entries[windowId] else { return }
+            // Click ripple: re-animate the reusable ring (expand + fade) at the
+            // sprite's current position, plus a quick scale-bounce of the sprite.
+            let dur = GhostAnimationParams.pulseDuration
+            entry.ripple.position = entry.sprite.position
+            let grow = CABasicAnimation(keyPath: "transform.scale")
+            grow.fromValue = 1.0
+            grow.toValue = GhostAnimationParams.pulseMaxScale
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = 1.0
+            fade.toValue = 0.0
+            let group = CAAnimationGroup()
+            group.animations = [grow, fade]
+            group.duration = dur
+            entry.ripple.add(group, forKey: "ripple")     // ripple.opacity stays 0
+
+            let bounce = CAKeyframeAnimation(keyPath: "transform.scale")
+            bounce.values = [1.0, 1.25, 1.0]
+            bounce.keyTimes = [0, 0.5, 1]
+            bounce.duration = dur * 0.6
+            entry.sprite.add(bounce, forKey: "bounce")
+        }
+    }
+
+    public func highlight(windowId: Int, bounds: Rect) {
+        onMain {
+            guard let entry = self.entries[windowId] else { return }
+            // Convert the CG-global element rect into the panel's local space using
+            // the same y-flip as the sprite point conversion (top-left → bottom-left).
+            let cg = entry.windowCGRect
+            let localX = bounds.x - cg.x
+            let localY = cg.h - (bounds.y - cg.y) - bounds.h
             CATransaction.begin()
-            CATransaction.setDisableActions(!animated)
-            entry.sprite.position = CGPoint(x: local.x, y: local.y)
+            CATransaction.setDisableActions(true)
+            entry.highlightLayer.frame = CGRect(x: localX, y: localY, width: bounds.w, height: bounds.h)
+            entry.highlightLayer.borderColor = entry.sprite.borderColor
             CATransaction.commit()
+
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = 1.0
+            fade.toValue = 0.0
+            fade.duration = GhostAnimationParams.highlightDuration
+            entry.highlightLayer.add(fade, forKey: "highlight")  // opacity stays 0
+        }
+    }
+
+    public func setThinking(windowId: Int, active: Bool) {
+        onMain {
+            guard let entry = self.entries[windowId] else { return }
+            entry.thinking = active
+            if active {
+                let wiggle = CABasicAnimation(keyPath: "transform.rotation.z")
+                wiggle.fromValue = -GhostAnimationParams.wiggleAmplitude
+                wiggle.toValue = GhostAnimationParams.wiggleAmplitude
+                wiggle.duration = GhostAnimationParams.wigglePeriod / 2
+                wiggle.autoreverses = true
+                wiggle.repeatCount = .greatestFiniteMagnitude
+                wiggle.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                entry.sprite.add(wiggle, forKey: "wiggle")
+            } else {
+                entry.sprite.removeAnimation(forKey: "wiggle")
+            }
         }
     }
 
@@ -136,10 +233,32 @@ public final class KitGhostCursorOverlay: GhostCursorOverlay {
         host.layer?.masksToBounds = true               // clip sprite to window rect (§7.2)
         panel.contentView = host
 
+        let s = Self.spriteSize
+        // Reusable click-ripple ring (kept invisible between pulses).
+        let ripple = CALayer()
+        ripple.bounds = CGRect(x: 0, y: 0, width: s, height: s)
+        ripple.cornerRadius = s / 2
+        ripple.position = CGPoint(x: -s, y: -s)
+        ripple.backgroundColor = CGColor(gray: 1, alpha: 0)
+        ripple.borderColor = CGColor(red: style.red, green: style.green, blue: style.blue, alpha: style.alpha)
+        ripple.borderWidth = 2
+        ripple.opacity = 0
+        host.layer?.addSublayer(ripple)
+
+        // Reusable element-highlight outline (kept invisible until highlight()).
+        let highlightLayer = CALayer()
+        highlightLayer.cornerRadius = 4
+        highlightLayer.borderColor = ripple.borderColor
+        highlightLayer.borderWidth = 2
+        highlightLayer.backgroundColor = CGColor(gray: 1, alpha: 0)
+        highlightLayer.opacity = 0
+        host.layer?.addSublayer(highlightLayer)
+
         let sprite = makeSprite(style: style)
         host.layer?.addSublayer(sprite)
 
-        return Entry(panel: panel, sprite: sprite, windowCGRect: windowCGRect)
+        return Entry(panel: panel, sprite: sprite, ripple: ripple,
+                     highlightLayer: highlightLayer, windowCGRect: windowCGRect)
     }
 
     private func makeSprite(style: GhostCursorStyle) -> CALayer {

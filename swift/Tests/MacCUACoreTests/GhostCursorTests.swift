@@ -13,6 +13,9 @@ final class FakeGhostOverlay: GhostCursorOverlay {
     var framed: [Int: Rect?] = [:]
     var hidden: [Int] = []
     var removed: [Int] = []
+    var pulsed: [Int] = []
+    var highlighted: [(Int, Rect)] = []
+    var thinking: [(Int, Bool)] = []
 
     func show(windowId: Int, style: GhostCursorStyle, windowFrame: Rect?) {
         shown.append(Shown(windowId: windowId, style: style, frame: windowFrame))
@@ -23,6 +26,9 @@ final class FakeGhostOverlay: GhostCursorOverlay {
     func setWindowFrame(windowId: Int, _ frame: Rect?) { framed[windowId] = frame }
     func hide(windowId: Int) { hidden.append(windowId) }
     func remove(windowId: Int) { removed.append(windowId) }
+    func pulse(windowId: Int) { pulsed.append(windowId) }
+    func highlight(windowId: Int, bounds: Rect) { highlighted.append((windowId, bounds)) }
+    func setThinking(windowId: Int, active: Bool) { thinking.append((windowId, active)) }
 }
 
 final class GhostCursorTests: XCTestCase {
@@ -337,5 +343,78 @@ final class GhostCursorTests: XCTestCase {
         XCTAssertEqual(
             GhostCursorGeometry.spritePointInPanel(screenPoint: Point(x: 200, y: 100), windowCGRect: rect),
             Point(x: 100, y: 50))
+    }
+
+    // MARK: - US-054 animations
+
+    func testScootControlPointsZeroLengthMoveHasNoArc() {
+        let (c1, c2) = GhostAnimationGeometry.scootControlPoints(from: Point(x: 5, y: 5),
+                                                                to: Point(x: 5, y: 5))
+        XCTAssertEqual(c1, Point(x: 5, y: 5))
+        XCTAssertEqual(c2, Point(x: 5, y: 5))
+    }
+
+    func testScootControlPointsBowPerpendicular() {
+        // Horizontal move (0,0)->(90,0): controls at x=30 and x=60, bowed in +y by
+        // dist*bow = 90*0.18 = 16.2 (perp of +x direction is (0,1)/(-dy,dx)/dist).
+        let (c1, c2) = GhostAnimationGeometry.scootControlPoints(from: Point(x: 0, y: 0),
+                                                                to: Point(x: 90, y: 0))
+        XCTAssertEqual(c1.x, 30, accuracy: 1e-9)
+        XCTAssertEqual(c2.x, 60, accuracy: 1e-9)
+        XCTAssertEqual(c1.y, 16.2, accuracy: 1e-9)
+        XCTAssertEqual(c2.y, 16.2, accuracy: 1e-9)
+    }
+
+    func testWiggleRotationPhases() {
+        // Sine wave: 0 at t=0, peak +amplitude at quarter period, 0 at half period.
+        XCTAssertEqual(GhostAnimationGeometry.wiggleRotation(atPhase: 0), 0, accuracy: 1e-9)
+        XCTAssertEqual(GhostAnimationGeometry.wiggleRotation(atPhase: GhostAnimationParams.wigglePeriod / 4),
+                       GhostAnimationParams.wiggleAmplitude, accuracy: 1e-9)
+        XCTAssertEqual(GhostAnimationGeometry.wiggleRotation(atPhase: GhostAnimationParams.wigglePeriod / 2),
+                       0, accuracy: 1e-9)
+    }
+
+    func testClampRectToWindowClampsOverhang() {
+        let frame = Rect(x: 100, y: 100, w: 200, h: 100)
+        // Rect overhanging the right/bottom edge is clamped into the frame.
+        let r = GhostCursorController.clampRectToWindow(Rect(x: 250, y: 150, w: 100, h: 100), frame)
+        XCTAssertEqual(r, Rect(x: 250, y: 150, w: 50, h: 50))
+        // Fully inside is unchanged.
+        XCTAssertEqual(
+            GhostCursorController.clampRectToWindow(Rect(x: 120, y: 120, w: 20, h: 20), frame),
+            Rect(x: 120, y: 120, w: 20, h: 20))
+    }
+
+    func testControllerForwardsPulseAndThinking() {
+        let fake = FakeGhostOverlay()
+        let c = GhostCursorController(overlay: fake)
+        c.startTracking(windowId: 1, windowFrame: Rect(x: 0, y: 0, w: 100, h: 100))
+        c.pulse(windowId: 1)
+        c.setThinking(windowId: 1, active: true)
+        c.setThinking(windowId: 1, active: false)
+        XCTAssertEqual(fake.pulsed, [1])
+        XCTAssertEqual(fake.thinking.map { $0.0 }, [1, 1])
+        XCTAssertEqual(fake.thinking.map { $0.1 }, [true, false])
+    }
+
+    func testControllerHighlightClampsToWindow() {
+        let fake = FakeGhostOverlay()
+        let c = GhostCursorController(overlay: fake)
+        c.startTracking(windowId: 7, windowFrame: Rect(x: 0, y: 0, w: 100, h: 100))
+        c.highlight(windowId: 7, bounds: Rect(x: 80, y: 80, w: 50, h: 50))
+        XCTAssertEqual(fake.highlighted.count, 1)
+        XCTAssertEqual(fake.highlighted[0].0, 7)
+        XCTAssertEqual(fake.highlighted[0].1, Rect(x: 80, y: 80, w: 20, h: 20))
+    }
+
+    func testBackgroundCursorClickPulsesGhost() {
+        let fake = FakeGhostOverlay()
+        let c = GhostCursorController(overlay: fake)
+        c.startTracking(windowId: 3, windowFrame: Rect(x: 0, y: 0, w: 500, h: 500))
+        let cursor = BackgroundCursor(pid: 1, windowId: 3)
+        cursor.ghost = c
+        cursor.clickAt(Point(x: 10, y: 10))
+        XCTAssertEqual(fake.pulsed, [3])           // click rippled
+        XCTAssertEqual(fake.moved.last?.point, Point(x: 10, y: 10))
     }
 }
