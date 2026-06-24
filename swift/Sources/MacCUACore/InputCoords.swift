@@ -60,6 +60,28 @@ public enum InputCoords {
         return (windowBounds.x + localX, windowBounds.y + localY)
     }
 
+    /// Window-LOCAL point (top-left origin, in window points) for a click computed
+    /// on a (possibly downscaled) screenshot. This is `windowToScreenCoords` minus
+    /// the window-origin offset — the SkyLight targeted-delivery path (US-030/C2)
+    /// needs the point in the window's own coordinate space, not screen-global.
+    public static func windowLocalPoint(
+        windowBounds: Rect,
+        x: Double, y: Double,
+        screenshotSize: (width: Int, height: Int)?
+    ) -> (x: Double, y: Double) {
+        var localX = x
+        var localY = y
+        if let shot = screenshotSize, shot.width > 0, shot.height > 0 {
+            let shotW = Double(shot.width)
+            let shotH = Double(shot.height)
+            localX = max(0.0, min(x, shotW - 1))
+            localY = max(0.0, min(y, shotH - 1))
+            localX = localX * (windowBounds.w / shotW)
+            localY = localY * (windowBounds.h / shotH)
+        }
+        return (localX, localY)
+    }
+
     /// Line-unit scroll deltas for a direction, as `(dy, dx)`. Ports
     /// `input.py::_scroll_deltas` (`_LINE_DELTA == 5`).
     public static func lineScrollDeltas(direction: String) -> (dy: Int, dx: Int) {

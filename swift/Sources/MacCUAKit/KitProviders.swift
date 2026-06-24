@@ -18,10 +18,14 @@ import MacCUAServer
 /// real; every other Kit provider is still a US-014 stub and is implemented in
 /// its own later story. The container shape never changes.
 public func makeKitProviders() -> Providers {
-    Providers(
+    // Shared SkyLight provider: gives the input layer its targeted (window-
+    // stamped) mouse path (US-030/C2) wired into clicks (US-032). Falls through
+    // to the CGEvent base path when the host doesn't resolve the symbols.
+    let skyLight = KitSkyLightProvider()
+    return Providers(
         apps: KitAppResolver(),
         accessibility: KitAccessibilityProvider(),
-        input: KitInputProvider(),
+        input: KitInputProvider(skyLight: skyLight),
         capture: KitCaptureProvider(),
         clipboard: KitClipboardProvider(),
         frontmostTracker: KitFrontmostTracker(),

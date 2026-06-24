@@ -55,8 +55,18 @@ public final class KitInputProvider: InputProvider {
     private let counterLock = NSLock()
     private var mouseEventNumber: Int64 = 0
 
-    public init() {
+    /// Optional SkyLight targeted-delivery path (US-030, C2). When present and the
+    /// host resolves the SkyLight mouse symbols, a window-relative click is
+    /// delivered window-stamped (better fidelity for Chromium/Electron, which
+    /// hit-test against the window-server window) and falls through to the CGEvent
+    /// base path on ANY failure (Inv 18 — never foregrounds). Absent on Linux/CI
+    /// and on hosts where the symbols don't resolve, so the CGEvent path is the
+    /// guaranteed transport.
+    private let skyLight: KitSkyLightProvider?
+
+    public init(skyLight: KitSkyLightProvider? = nil) {
         self.defaultSource = CGEventSource(stateID: .privateState)
+        self.skyLight = skyLight
     }
 
     public func createEventSource() -> EventSource {
@@ -152,29 +162,58 @@ public final class KitInputProvider: InputProvider {
         let (downType, upType) = mouseEventTypes(for: button)
         let btn = CGMouseButton(rawValue: button.buttonNumber)!
 
-        for clickNum in 1...max(1, count) {
-            if clickNum > 1 { Thread.sleep(forTimeInterval: 0.1) }
-
-            guard let down = CGEvent(
-                mouseEventSource: source, mouseType: downType,
-                mouseCursorPosition: point, mouseButton: btn) else {
-                throw AutomationError.cgEvent("\(CGEventError.failedToCreate): mouseDown")
+        // The down/up sequence (incl. multi-click clickState) is the pure
+        // `ClickDelivery` plan — shared with the SkyLight path so both transports
+        // emit byte-identical event shapes.
+        for step in ClickDelivery.sequence(count: count) {
+            switch step.phase {
+            case .down:
+                if step.clickState > 1 { Thread.sleep(forTimeInterval: 0.1) }
+                guard let down = CGEvent(
+                    mouseEventSource: source, mouseType: downType,
+                    mouseCursorPosition: point, mouseButton: btn) else {
+                    throw AutomationError.cgEvent("\(CGEventError.failedToCreate): mouseDown")
+                }
+                decorateMouseEvent(down, windowId: windowId, pressure: step.pressure,
+                                   clickState: Int64(step.clickState), eventNumber: nextEventNumber())
+                down.postToPid(pid_t(pid))
+                Thread.sleep(forTimeInterval: 0.005)
+            case .up:
+                guard let up = CGEvent(
+                    mouseEventSource: source, mouseType: upType,
+                    mouseCursorPosition: point, mouseButton: btn) else {
+                    throw AutomationError.cgEvent("\(CGEventError.failedToCreate): mouseUp")
+                }
+                decorateMouseEvent(up, windowId: windowId, pressure: step.pressure,
+                                   clickState: Int64(step.clickState), eventNumber: nextEventNumber())
+                up.postToPid(pid_t(pid))
             }
-            decorateMouseEvent(down, windowId: windowId, pressure: Self.mousePressure,
-                               clickState: Int64(clickNum), eventNumber: nextEventNumber())
-            down.postToPid(pid_t(pid))
-
-            Thread.sleep(forTimeInterval: 0.005)
-
-            guard let up = CGEvent(
-                mouseEventSource: source, mouseType: upType,
-                mouseCursorPosition: point, mouseButton: btn) else {
-                throw AutomationError.cgEvent("\(CGEventError.failedToCreate): mouseUp")
-            }
-            decorateMouseEvent(up, windowId: windowId, pressure: 0.0,
-                               clickState: Int64(clickNum), eventNumber: nextEventNumber())
-            up.postToPid(pid_t(pid))
         }
+    }
+
+    /// Attempt the SkyLight targeted (window-stamped) click for a window-relative
+    /// click. Returns `false` on ANY failure so the caller falls through to the
+    /// guaranteed CGEvent base path — NEVER foregrounds (Inv 18). The down/up
+    /// sequence is the same pure `ClickDelivery` plan as the CGEvent path.
+    private func trySkyLightClick(
+        pid: Int, windowId: Int, windowLocalPoint: CGPoint,
+        button: MouseButton, count: Int
+    ) -> Bool {
+        guard let sky = skyLight, sky.capabilities.canDeliverMouse else { return false }
+        let (downType, upType) = mouseEventTypes(for: button)
+        let btn = CGMouseButton(rawValue: button.buttonNumber)!
+
+        for step in ClickDelivery.sequence(count: count) {
+            let type = step.phase == .down ? downType : upType
+            if step.phase == .down, step.clickState > 1 { Thread.sleep(forTimeInterval: 0.1) }
+            let delivered = sky.deliverMouse(
+                pid: pid, windowId: windowId, windowLocalPoint: windowLocalPoint,
+                type: type, button: btn, clickCount: step.clickState,
+                pressure: step.pressure, eventNumber: Int(nextEventNumber()))
+            if !delivered { return false }
+            if step.phase == .down { Thread.sleep(forTimeInterval: 0.005) }
+        }
+        return true
     }
 
     public func clickAt(
@@ -185,10 +224,22 @@ public final class KitInputProvider: InputProvider {
         guard let mb = MouseButton(name: button) else {
             throw AutomationError.input("Unknown mouse button: \(button)")
         }
-        guard let screen = windowToScreenCoords(
-            windowId: windowId, x: x, y: y, screenshotSize: screenshotSize) else {
+        guard let bounds = windowBounds(windowId: windowId) else {
             throw AutomationError.input("Cannot resolve window \(windowId)")
         }
+        // Fidelity-first: try the window-stamped SkyLight path (C2); it routes to
+        // the window server's hit-test, which Chromium/Electron honor. Falls
+        // through to the CGEvent base path on any failure (no foregrounding).
+        let local = InputCoords.windowLocalPoint(
+            windowBounds: bounds, x: x, y: y, screenshotSize: screenshotSize)
+        if trySkyLightClick(
+            pid: pid, windowId: windowId,
+            windowLocalPoint: CGPoint(x: local.x, y: local.y),
+            button: mb, count: count) {
+            return
+        }
+        let screen = InputCoords.windowToScreenCoords(
+            windowBounds: bounds, x: x, y: y, screenshotSize: screenshotSize)
         try postClick(pid: pid, point: CGPoint(x: screen.x, y: screen.y),
                       button: mb, count: count, windowId: windowId,
                       source: resolveSource(source))
