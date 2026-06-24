@@ -52,6 +52,25 @@ final class StubsTests: XCTestCase {
         KitAppResolver().restoreFrontmostApp(nil)
     }
 
+    func testWalkTreeEmptyRefIsInertAndNonActivating() throws {
+        // US-017: walking an element with no backing AXUIElement must return an
+        // empty tree (fail honestly) — never crash, never activate/raise. The
+        // real-app walk needs a live AX tree (MANUAL-VERIFY).
+        let nodes = try KitAccessibilityProvider().walkTree(
+            axElement: KitAXElementRef(), targetPid: 1234, maxDepth: 30,
+            maxNodes: 5000, includeActions: true, includeStates: true)
+        XCTAssertTrue(nodes.isEmpty)
+    }
+
+    func testRefsEqualMatchesIdentityForNilHandles() {
+        // Two empty Kit refs are distinct objects with no AXUIElement; refsEqual
+        // falls back to === and must not crash.
+        let p = KitAccessibilityProvider()
+        let a = KitAXElementRef()
+        XCTAssertTrue(p.refsEqual(a, a))
+        XCTAssertFalse(p.refsEqual(a, KitAXElementRef()))
+    }
+
     func testPermissionSeamsReturnWithoutCrashing() {
         // US-015: the permission seams are now REAL (AXIsProcessTrustedWithOptions
         // / CGPreflightScreenCaptureAccess). They must answer a Bool without

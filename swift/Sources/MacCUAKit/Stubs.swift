@@ -54,35 +54,7 @@ public final class KitEditableText: EditableText {
 
 // MARK: - AppResolver (real impl lives in KitAppResolver.swift, US-016)
 
-// MARK: - AccessibilityProvider (US-017/018/019/020/021)
-
-public final class KitAccessibilityProvider: AccessibilityProvider {
-    public init() {}
-    public func walkTree(axElement: AXElementRef, targetPid: Int?, maxDepth: Int, maxNodes: Int, includeActions: Bool, includeStates: Bool) throws -> [Node] { unimplemented() }
-    public func getKeyWindow(axApp: AXElementRef) -> AXElementRef? { nil }
-    public func getWindows(axApp: AXElementRef) -> [AXElementRef] { [] }
-    public func getMenuBar(axApp: AXElementRef) -> AXElementRef? { nil }
-    public func getWindowTitle(axWindow: AXElementRef) -> String? { nil }
-    public func getFocusedElement(axApp: AXElementRef, tree: [Node]) -> Int? { nil }
-    public func getElementFrame(node: Node) -> Rect? { nil }
-    public func elementAtPosition(axApp: AXElementRef, x: Double, y: Double) -> AXElementRef? { nil }
-    public func getPid(axElement: AXElementRef) -> Int? { nil }
-    public func refsEqual(_ a: AXElementRef?, _ b: AXElementRef?) -> Bool { a === b }
-    public func nodeFromRef(_ element: AXElementRef, depth: Int, index: Int) throws -> Node { unimplemented() }
-    public func getActionNamesForRef(_ element: AXElementRef) -> [String] { [] }
-    public func getParentRef(_ element: AXElementRef) -> AXElementRef? { nil }
-    public func getChildren(_ element: AXElementRef) -> [AXElementRef] { [] }
-    public func hasScrollbarRef(_ element: AXElementRef) -> Bool { false }
-    public func getAttributeValue(_ element: AXElementRef, _ attr: String) -> String? { nil }
-    public func isAttributeSettable(node: Node, _ attr: String) -> Bool { false }
-    public func performAction(node: Node, action: String) throws { unimplemented() }
-    public func performActionOnRef(_ axRef: AXElementRef, action: String) throws { unimplemented() }
-    public func setAttribute(node: Node, _ attr: String, _ value: String) throws { unimplemented() }
-    public func makeEditableText(element: AXElementRef, pid: Int?) -> EditableText? { nil }
-    public func extractWebAreaText(_ element: AXElementRef, targetPid: Int?) -> String? { nil }
-    public func extractTextAreaContent(_ element: AXElementRef, targetPid: Int?) -> String? { nil }
-    public func getWebURL(_ element: AXElementRef) -> String? { nil }
-}
+// MARK: - AccessibilityProvider — real impl in KitAccessibilityProvider.swift (US-017)
 
 // MARK: - InputProvider (US-028 onward)
 
