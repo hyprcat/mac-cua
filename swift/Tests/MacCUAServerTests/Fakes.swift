@@ -184,21 +184,49 @@ final class FakeInput: InputProvider {
     private(set) var typed: [String] = []
     private(set) var scrolls: [(direction: String, kind: String)] = []
 
-    func createEventSource() -> EventSource { FakeEventSource() }
+    /// Every synthetic event delivered through this fake, tagged with the target
+    /// pid/windowId and the identity of the per-session `EventSource` it rode on.
+    /// Lets the multi-session acceptance test (US-056) prove no cross-talk: every
+    /// event for session A carries A's pid + A's source, distinct from B's.
+    /// [SPINE TEST HOOK]
+    struct DeliveredEvent {
+        let kind: String       // "click" | "type" | "key" | "scroll"
+        let pid: Int
+        let windowId: Int?
+        let sourceId: ObjectIdentifier?
+    }
+    private(set) var events: [DeliveredEvent] = []
+    /// Count of distinct event sources handed out (one per session expected).
+    private(set) var createdSourceCount = 0
+    private func sid(_ s: EventSource?) -> ObjectIdentifier? { s.map { ObjectIdentifier($0) } }
+
+    func createEventSource() -> EventSource {
+        createdSourceCount += 1
+        return FakeEventSource()
+    }
     func clickAt(pid: Int, windowId: Int, x: Double, y: Double, button: String, count: Int,
                  screenshotSize: (width: Int, height: Int)?, source: EventSource?) throws {
         clicks.append((x, y, button, count))
+        events.append(.init(kind: "click", pid: pid, windowId: windowId, sourceId: sid(source)))
     }
     func clickAtScreenPoint(pid: Int, x: Double, y: Double, button: String, count: Int,
                             windowId: Int?, source: EventSource?) throws {
         clicks.append((x, y, button, count))
+        events.append(.init(kind: "click", pid: pid, windowId: windowId, sourceId: sid(source)))
     }
     func drag(pid: Int, windowId: Int, fromX: Double, fromY: Double, toX: Double, toY: Double,
               screenshotSize: (width: Int, height: Int)?, source: EventSource?) throws {
         drags.append((fromX, fromY, toX, toY))
+        events.append(.init(kind: "drag", pid: pid, windowId: windowId, sourceId: sid(source)))
     }
-    func pressKey(pid: Int, key: String, source: EventSource?) throws { keys.append(key) }
-    func typeText(pid: Int, text: String, source: EventSource?) throws { typed.append(text) }
+    func pressKey(pid: Int, key: String, source: EventSource?) throws {
+        keys.append(key)
+        events.append(.init(kind: "key", pid: pid, windowId: nil, sourceId: sid(source)))
+    }
+    func typeText(pid: Int, text: String, source: EventSource?) throws {
+        typed.append(text)
+        events.append(.init(kind: "type", pid: pid, windowId: nil, sourceId: sid(source)))
+    }
     func scrollPid(pid: Int, x: Double, y: Double, direction: String, clicks: Int,
                    windowId: Int?, source: EventSource?) throws {
         scrolls.append((direction, "line"))
