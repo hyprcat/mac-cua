@@ -65,6 +65,22 @@ extension SessionManager {
         var session: AppSession?
         var previousFrontmost: AppInfo?
 
+        // Redacted audit trail (US-048): emit exactly one record for this action
+        // on every exit path. Secrets + tree-refs are scrubbed by AuditRedactor.
+        var auditSuccess = false
+        var auditError: String?
+        defer {
+            if let sink = providers.auditSink {
+                sink.record(AuditRecord(
+                    timestamp: Date().timeIntervalSince1970,
+                    tool: tool,
+                    app: session?.target.bundleId,
+                    success: auditSuccess,
+                    error: auditError,
+                    params: AuditRedactor.redactParams(tool: tool, params: params)))
+            }
+        }
+
         do {
             // Step 1: resolve target session.
             ensureTrackersStarted()
@@ -126,6 +142,7 @@ extension SessionManager {
                         cursorBefore: cursorBefore, preNodes: preNodes)
                 }
                 providers.analytics.serviceResult(tool, success: true, durationMs: 0.0)
+                auditSuccess = true
                 restorePreviousFrontmostApp(resolved, previousFrontmost)
                 return r
             }
@@ -183,9 +200,11 @@ extension SessionManager {
             }
 
             // Step 11-12: restore frontmost + return.
+            auditSuccess = true
             restorePreviousFrontmostApp(resolved, previousFrontmost)
             return response
         } catch let e as AutomationError where e.kind == .staleReference {
+            auditError = e.message
             cleanupAfterAction(session, previousFrontmost)
             if let session {
                 var response = takeSnapshot(session)
@@ -194,6 +213,7 @@ extension SessionManager {
             }
             return errorOnly(e.message)
         } catch let e as AutomationError where e.kind == .userInterruption {
+            auditError = e.message
             cleanupAfterAction(session, previousFrontmost)
             if let session {
                 return ToolResponse(
@@ -204,6 +224,7 @@ extension SessionManager {
             }
             return errorOnly(e.message)
         } catch let e as AutomationError {
+            auditError = e.message
             cleanupAfterAction(session, previousFrontmost)
             if let session {
                 return trySnapshotOrError(session, e)
@@ -211,6 +232,7 @@ extension SessionManager {
             return errorOnly(e.message)
         } catch {
             // Failproof: any non-AutomationError still yields a useful response.
+            auditError = "\(error)"
             cleanupAfterAction(session, previousFrontmost)
             if let session {
                 return trySnapshotOrError(session, error)

@@ -110,6 +110,10 @@ public final class Providers {
     public let input: InputProvider
     public let capture: CaptureProvider
     public let analytics: Analytics
+    /// Redacted JSONL audit trail of actions (US-048, design §G). Optional: nil
+    /// (the default) disables auditing; secrets/tree-refs are scrubbed by
+    /// `AuditRedactor` before anything reaches the sink.
+    public let auditSink: AuditSink?
     /// System pasteboard (clipboard tool, US-010 wiring / US-041 real impl).
     public let clipboard: ClipboardProvider
     /// Vision OCR fallback for tree-less surfaces (A2, US-046). Optional: nil
@@ -137,6 +141,7 @@ public final class Providers {
         input: InputProvider,
         capture: CaptureProvider,
         analytics: Analytics = NoopAnalytics(),
+        auditSink: AuditSink? = nil,
         clipboard: ClipboardProvider,
         ocr: OCRProvider? = nil,
         frontmostTracker: FrontmostTracking,
@@ -154,6 +159,7 @@ public final class Providers {
         self.input = input
         self.capture = capture
         self.analytics = analytics
+        self.auditSink = auditSink
         self.clipboard = clipboard
         self.ocr = ocr
         self.frontmostTracker = frontmostTracker
