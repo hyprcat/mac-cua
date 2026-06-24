@@ -59,6 +59,11 @@ public final class KitCaptureProvider: CaptureProvider {
     /// Invalidated on display-config (callback) and window-replace (signature).
     let filterCache = CaptureFilterCache<AnyObject>()
 
+    /// US-043: SCK circuit breaker. After 2 consecutive SCK failures (e.g. macOS
+    /// screen recording holding ScreenCaptureKit) SCK is bypassed for 30 s and the
+    /// private CG fallback runs immediately — no crash, no foregrounding (Inv 13).
+    let sckBreaker = CircuitBreaker()
+
     public init() {
         registerDisplayReconfigurationObserver()
     }

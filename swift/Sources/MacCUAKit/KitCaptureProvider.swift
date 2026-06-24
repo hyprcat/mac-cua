@@ -84,6 +84,12 @@ extension KitCaptureProvider {
         // matches (window-replace guard); only re-resolve (the ~80–200 ms cold
         // SCShareableContent discovery) on a miss.
         let signature = currentSignature(windowId: windowId)
+        // US-043: circuit breaker. While SCK is repeatedly failing (e.g. macOS
+        // screen recording holding it), bypass it entirely and go straight to the
+        // private CG fallback — no crash, no foregrounding.
+        guard sckBreaker.shouldAttempt() else {
+            return privateFallbackImage(windowId: windowId, signature: signature)
+        }
         let cachedFilter: SCContentFilter? = signature.flatMap {
             filterCache.value(forWindowId: windowId, signature: $0) as? SCContentFilter
         }
@@ -94,7 +100,9 @@ extension KitCaptureProvider {
             target = shareableWindow(windowId: windowId, pid: pid)
         } else {
             guard let resolved = shareableWindow(windowId: windowId, pid: pid) else {
-                // SCK shareable-content unavailable: try the private GPU fallback.
+                // SCK shareable-content unavailable: count the failure and try the
+                // private GPU fallback (US-043).
+                sckBreaker.recordFailure()
                 return privateFallbackImage(windowId: windowId, signature: signature)
             }
             target = resolved
@@ -129,10 +137,14 @@ extension KitCaptureProvider {
         guard let cg = captureImageSync(filter: filter, config: config),
               cg.width > 0, cg.height > 0 else {
             // SCK capture returned nil: the filter may be stale (window replaced
-            // under a recycled id) — drop it and try the private GPU fallback.
+            // under a recycled id) — drop it, count the failure (US-043), and try
+            // the private GPU fallback.
             filterCache.invalidate(windowId: windowId)
+            sckBreaker.recordFailure()
             return privateFallbackImage(windowId: windowId, signature: signature)
         }
+        // SCK delivered a frame — reset the breaker (US-043).
+        sckBreaker.recordSuccess()
         let maxPixel = CaptureDownscale.maxPixelSize(
             width: cg.width, height: cg.height
         )
