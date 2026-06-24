@@ -375,17 +375,15 @@ public final class KitInputProvider: InputProvider {
 
     public func typeText(pid: Int, text: String, source: EventSource?) throws {
         let src = resolveSource(source)
-        for ch in text {
-            var keyName = String(ch)
-            if ch == " " { keyName = "space" }
-            else if ch == "\n" || ch == "\r" { keyName = "return" }
-            else if ch == "\t" { keyName = "tab" }
-
-            if let parsed = try? KeyParser.parseKeyCombo(keyName) {
-                try postKeycodeWithModifiers(pid: pid, keycode: parsed.keycode,
-                                             modifiers: parsed.mask, source: src)
-            } else {
-                try postUnicodeChar(pid: pid, char: String(ch), source: src)
+        // Pure, per-grapheme plan (US-033): multi-scalar emoji / accented text
+        // stays one Unicode keystroke; plain keys take the keycode path.
+        for step in TypeTextPlan.plan(for: text) {
+            switch step {
+            case let .keycode(keycode, modifiers):
+                try postKeycodeWithModifiers(pid: pid, keycode: keycode,
+                                             modifiers: modifiers, source: src)
+            case let .unicode(grapheme):
+                try postUnicodeChar(pid: pid, char: grapheme, source: src)
             }
             Thread.sleep(forTimeInterval: 0.005)
         }
