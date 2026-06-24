@@ -136,6 +136,40 @@ final class SpineTests: XCTestCase {
         XCTAssertNil(second.guidance)
     }
 
+    func testExecuteGetAppStateInjectsCuratedPlaybookAndFormats() throws {
+        let pid = 7, windowId = 23
+        let apps = FakeAppResolver()
+        apps.running = [AppInfo(name: "Safari", bundleId: "com.apple.Safari", pid: pid, running: true)]
+        apps.resolved = apps.running.first
+        let cap = captureWith(windowId: windowId, pid: pid)
+        let ax = FakeAccessibility()
+        // Rich (AX-good) tree → only the curated playbook, no AX-poor hint.
+        ax.tree = [
+            Node(index: 0, role: "group", depth: 0),
+            Node(index: 1, role: "button", depth: 1),
+            Node(index: 2, role: "textField", depth: 1),
+        ]
+        let mgr = SessionManager(
+            providers: makeFakeProviders(apps: apps, accessibility: ax, capture: cap),
+            flags: flags())
+
+        let first = mgr.execute("get_app_state", ["window_id": windowId])
+        XCTAssertNotNil(first.guidance)
+        XCTAssertTrue(first.guidance?.contains("Safari Tips") ?? false)
+
+        // Rendered into the model packet as an app_specific_instructions block.
+        let blocks = formatMCP(first)
+        guard case let .text(text) = blocks[0] else {
+            return XCTFail("first block should be text")
+        }
+        XCTAssertTrue(text.contains("<app_specific_instructions>"))
+        XCTAssertTrue(text.contains("Safari Tips"))
+
+        // Once-per-session: second call carries no guidance.
+        let second = mgr.execute("get_app_state", ["window_id": windowId])
+        XCTAssertNil(second.guidance)
+    }
+
     func testExecuteActionToolMissingTargetReturnsErrorNotThrow() {
         let mgr = SessionManager(providers: makeFakeProviders(), flags: flags())
         // No window_id/app → resolveSession throws .automation → caught, snapshot

@@ -681,7 +681,7 @@
         "swift build && swift test pass on Linux (content + injection are pure)"
       ],
       "priority": 50,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

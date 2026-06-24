@@ -1574,11 +1574,15 @@ extension SessionManager {
     }
 
     /// Ports `_load_guidance` (session.py:3779). The Server layer has no bundled
-    /// guidance directory; returns the per-process cache (empty by default).
+    /// guidance *directory*; instead the curated per-app playbooks (US-049) are
+    /// embedded as `BuiltinPlaybooks` in Core. A value seeded into the cache (e.g.
+    /// a loose on-disk file added by a future deployment, or a test override) wins;
+    /// otherwise the built-in playbook for the bundle id is used.
     func loadGuidance(_ bundleId: String) -> String? {
         if let cached = guidanceCache[bundleId] { return cached }
-        guidanceCache[bundleId] = nil
-        return nil
+        let guidance = BuiltinPlaybooks.guidance(for: bundleId)
+        guidanceCache[bundleId] = guidance
+        return guidance
     }
 }
 
