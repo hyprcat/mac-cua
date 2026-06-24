@@ -30,3 +30,11 @@ Started: (stamped on first ./ralph.sh run)
 - Quality gate: `swift build` clean; `swift test` 372 passed / 0 fail (was 362).
 - Learnings: settle is by-observation, never a fixed sleep — model it as a poll-fed state machine that returns nil ("keep polling") vs a terminal SettleResult, with the real clock + poll loop living in the Kit `SettleMonitor` impl. Animation-awareness is just "a changing rect resets the quiet timer exactly like a structural change," so a never-quiescing animation naturally falls through to the hard cap. Keep instance-based (not Python's class-level globals) so Core stays pure/testable.
 ---
+
+## US-003 — Post-action AX change-summary verdict (E3) in Core
+- Implemented in `swift/Sources/MacCUACore/Verdict.swift`: `ChangeSummary {added,removed,changed: [String]}` (+ `isEmpty`/`totalChanges`), `TreeDiff.stableKey(_:)` / `TreeDiff.changeSummary(pre:post:)` (pure tree diff keyed by graphLocator identity, NOT role|label|frame), and an `ActionVerifier.computeVerdict` overload taking a `ChangeSummary` (delegates to the scalar version via `!summary.isEmpty`). Stable key derives from `graphLocator` (structural fields minus volatile `value`), falls back to `axId`, then preorder `index`. "changed" = same key, differing volatile signature (value/states-sorted/label/description/valueDescription/placeholder).
+- Tests: `swift/Tests/MacCUACoreTests/ChangeSummaryTests.swift` (13 cases: no-change, added/removed/changed-only, state set-order ignored, keyed-by-locator-not-index, mixed add/remove/change, + 5 verdict-overload cases incl. transport-confirmed+0/0/0 => DELIVERED_NO_EFFECT and transportOnly ignores summary). Existing VerdictTests stay green (raw values unchanged).
+- Sub-agents used: none — small contained pure-logic story done directly in main thread (matches US-001/US-002 sizing).
+- Quality gate: `swift build` clean; `swift test` 385 passed / 0 fail (was 372).
+- Learnings: keep the E3 summary overload as a thin delegate to the existing scalar `computeVerdict` so the load-bearing check order (transport → transportOnly → diff → no-effect) lives in exactly one place. Element identity for any diff must come off the graphLocator (US-012 bans role|label|frame as the key); exclude the volatile `value` from the identity key and put it in the change-signature instead, else every value change reads as remove+add.
+---

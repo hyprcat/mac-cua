@@ -96,6 +96,126 @@ public struct ElementSnapshot: Equatable {
     }
 }
 
+// MARK: - Tree-wide change summary (E3)
+
+/// A structured diff between a pre-action and post-action node tree, keyed by a
+/// *stable element key* (the graph locator identity, NOT `role|label|frame` —
+/// see SWIFT_PORT_DESIGN §3 invariant on element keys / US-012). This is the E3
+/// upgrade: it lets the verdict say "confirmed transport + zero tree change =
+/// `DELIVERED_NO_EFFECT`" as a first-class outcome rather than inferring it from
+/// a single element snapshot.
+///
+/// `added` / `removed` / `changed` carry the stable keys of the affected nodes
+/// so callers can report exactly *what* moved without leaking any AX ref string
+/// into the model packet.
+public struct ChangeSummary: Sendable, Equatable {
+    /// Stable keys present only in `post`.
+    public let added: [String]
+    /// Stable keys present only in `pre`.
+    public let removed: [String]
+    /// Stable keys present in both, but with a differing volatile attribute
+    /// (value / states / label / description / valueDescription / placeholder).
+    public let changed: [String]
+
+    public init(added: [String], removed: [String], changed: [String]) {
+        self.added = added
+        self.removed = removed
+        self.changed = changed
+    }
+
+    /// True when nothing was added, removed, or changed (the 0/0/0 case that
+    /// drives `DELIVERED_NO_EFFECT`).
+    public var isEmpty: Bool {
+        added.isEmpty && removed.isEmpty && changed.isEmpty
+    }
+
+    public var totalChanges: Int {
+        added.count + removed.count + changed.count
+    }
+}
+
+/// Pure tree-diff helpers. Stateless — given the pre/post flat node lists, emit
+/// the `ChangeSummary`.
+public enum TreeDiff {
+    /// The stable identity key for a node: derived from its `graphLocator`
+    /// (structural identity, excluding the volatile `value`), falling back to
+    /// `axId`, then to the preorder index. Deliberately NOT `role|label|frame`.
+    public static func stableKey(_ node: Node) -> String {
+        if let loc = node.graphLocator {
+            let path = loc.parentPath
+                .map { "\($0.axRole ?? "")~\($0.label ?? "")~\($0.identity ?? "")" }
+                .joined(separator: "/")
+            return [
+                "loc",
+                loc.axRole ?? "",
+                loc.label ?? "",
+                loc.description ?? "",
+                loc.axId ?? "",
+                String(loc.depth),
+                String(loc.siblingOrdinal),
+                path,
+            ].joined(separator: "|")
+        }
+        if let axId = node.axId, !axId.isEmpty {
+            return "ax|\(axId)"
+        }
+        return "idx|\(node.index)"
+    }
+
+    /// The volatile attributes that, if they differ between two same-key nodes,
+    /// mark the node as `changed`.
+    private static func volatileSignature(_ node: Node) -> [String?] {
+        [
+            node.value,
+            node.states.sorted().joined(separator: ","),
+            node.label,
+            node.description,
+            node.valueDescription,
+            node.placeholder,
+        ]
+    }
+
+    /// Compute the added / removed / changed summary between two node trees.
+    /// Keys are emitted in `pre`-then-`post` first-seen order for determinism.
+    public static func changeSummary(pre: [Node], post: [Node]) -> ChangeSummary {
+        var preByKey: [String: Node] = [:]
+        var preOrder: [String] = []
+        for node in pre {
+            let key = stableKey(node)
+            if preByKey[key] == nil { preOrder.append(key) }
+            preByKey[key] = node
+        }
+
+        var postByKey: [String: Node] = [:]
+        var postOrder: [String] = []
+        for node in post {
+            let key = stableKey(node)
+            if postByKey[key] == nil { postOrder.append(key) }
+            postByKey[key] = node
+        }
+
+        var removed: [String] = []
+        var changed: [String] = []
+        for key in preOrder {
+            guard let before = preByKey[key] else { continue }
+            if let after = postByKey[key] {
+                if volatileSignature(before) != volatileSignature(after) {
+                    changed.append(key)
+                }
+            } else {
+                removed.append(key)
+            }
+        }
+
+        var added: [String] = []
+        for key in postOrder where preByKey[key] == nil {
+            added.append(key)
+        }
+
+        return ChangeSummary(added: added, removed: removed, changed: changed)
+    }
+}
+
 /// Stateless verdict computation. Session wires in the actual AX/transport
 /// signals.
 public enum ActionVerifier {
@@ -132,5 +252,24 @@ public enum ActionVerifier {
         }
 
         return .deliveredNoEffect
+    }
+
+    /// E3 overload: compute the verdict from a tree-wide `ChangeSummary` instead
+    /// of a single-element diff. Same load-bearing order as the scalar version:
+    /// no transport ⇒ `transportFailed`; `transportOnly` ⇒ `confirmed`; any
+    /// added/removed/changed ⇒ `confirmed`/`confirmedViaFallback`; otherwise —
+    /// confirmed transport, 0/0/0 change — `deliveredNoEffect`.
+    public static func computeVerdict(
+        transportConfirmed: Bool,
+        changeSummary: ChangeSummary,
+        expected: ExpectedDiff,
+        fallbackUsed: Bool
+    ) -> DeliveryVerdict {
+        computeVerdict(
+            transportConfirmed: transportConfirmed,
+            diffAnyChanged: !changeSummary.isEmpty,
+            expected: expected,
+            fallbackUsed: fallbackUsed
+        )
     }
 }
