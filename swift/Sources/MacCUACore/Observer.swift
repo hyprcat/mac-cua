@@ -118,6 +118,99 @@ public final class DebounceStateMachine {
     }
 }
 
+// MARK: - TreeFingerprint (poll feed for the SettleMonitor)
+
+/// Pure derivation of the two signals the `DebounceStateMachine` consumes from a
+/// pruned node tree: a stable structural/content fingerprint and the set of
+/// key-frame rects whose motion means an animation is still in flight.
+///
+/// This replaces AXObserver as the settle-correctness feed (§5.3): the Kit
+/// `SettleMonitor` re-walks the tree each poll and runs these two pure functions,
+/// so "did the UI change / is it still moving" is decided by observation, never
+/// by a notification flag.
+public enum TreeFingerprint {
+    /// Stable hash over the structure + content that the model can perceive.
+    /// Deliberately excludes per-node geometry (position/size) — geometry is fed
+    /// separately as `keyFrameRects` so a moving control reads as "animating"
+    /// (keep waiting), not as a brand-new structural change every poll.
+    public static func compute(_ nodes: [Node]) -> Int {
+        var hasher = Hasher()
+        hasher.combine(nodes.count)
+        for node in nodes {
+            hasher.combine(node.depth)
+            hasher.combine(node.role)
+            hasher.combine(node.label)
+            hasher.combine(node.value)
+            hasher.combine(node.description)
+            hasher.combine(node.valueDescription)
+            hasher.combine(node.placeholder)
+            hasher.combine(node.selectedText)
+            // States are already emitted in a canonical sorted order by the
+            // walker; combine as-is so set membership changes register.
+            for state in node.states { hasher.combine(state) }
+        }
+        return hasher.finalize()
+    }
+
+    /// Key-frame rects for animation detection: one `SettleRect` per node that
+    /// carries both a position and a size, in stable preorder. A change in this
+    /// list between two polls = motion in flight, which keeps the machine waiting.
+    public static func keyFrameRects(_ nodes: [Node]) -> [SettleRect] {
+        var rects: [SettleRect] = []
+        rects.reserveCapacity(nodes.count)
+        for node in nodes {
+            guard let p = node.position, let s = node.size else { continue }
+            rects.append(SettleRect(x: p.x, y: p.y, width: s.w, height: s.h))
+        }
+        return rects
+    }
+}
+
+// MARK: - SettlePoller (pure poll-loop driver)
+
+/// Pure, fully-injected driver of the settle poll loop. Wraps a
+/// `DebounceStateMachine` and pumps it with samples until it returns a terminal
+/// `SettleResult`, sleeping `pollInterval` between polls. Time and I/O are
+/// injected (`now` / `sleep` / `sample`) so the loop itself is Linux-testable;
+/// the Kit `SettleMonitor` supplies a real clock, `Thread.sleep`, and a tree
+/// re-walk for `sample`.
+public struct SettlePoller {
+    public let quietPeriod: Double
+    public let maxWait: Double
+    public let pollInterval: Double
+
+    public init(quietPeriod: Double, maxWait: Double, pollInterval: Double) {
+        self.quietPeriod = quietPeriod
+        self.maxWait = max(0, maxWait)
+        // Never let a zero/negative interval spin the CPU; never overshoot the cap.
+        self.pollInterval = min(max(pollInterval, 0.001), max(self.maxWait, 0.001))
+    }
+
+    /// Run the loop to a terminal result.
+    ///
+    /// - Parameters:
+    ///   - now: monotonic clock read (seconds).
+    ///   - sample: produces (fingerprint, key-frame rects) for the current tree.
+    ///   - sleep: blocks for the given seconds (real clock advance between polls).
+    ///   - isCancelled: optional cooperative cancel check (Inv 16 user-yield).
+    public func run(
+        now: () -> Double,
+        sample: () -> (fingerprint: Int, frames: [SettleRect]),
+        sleep: (Double) -> Void,
+        isCancelled: () -> Bool = { false }
+    ) -> SettleResult {
+        let machine = DebounceStateMachine(quietPeriod: quietPeriod, maxWait: maxWait, startTime: now())
+        while true {
+            if isCancelled() { return .cancelled }
+            let s = sample()
+            if let result = machine.tick(now: now(), fingerprint: s.fingerprint, frameRects: s.frames) {
+                return result
+            }
+            sleep(pollInterval)
+        }
+    }
+}
+
 // MARK: - AssertionTracker
 
 /// Kinds of AX access that can be asserted (ports `AXEnablementKind`).

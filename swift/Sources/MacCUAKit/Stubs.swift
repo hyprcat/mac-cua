@@ -113,15 +113,7 @@ public final class KitClipboardProvider: ClipboardProvider {
     public func clear() throws { unimplemented() }
 }
 
-// MARK: - SettleMonitor (US-025)
-
-public final class KitSettleMonitor: SettleMonitor {
-    public init() {}
-    public func waitForSettle(context: String, timeout: Double, quietPeriod: Double) -> SettleResult { .noChange }
-    public var isInvalidated: Bool { false }
-    public func reset() {}
-    public func cancel() {}
-}
+// MARK: - SettleMonitor — real impl in KitRunLoop.swift (US-025)
 
 // MARK: - OutcomeMonitor (US-037)
 
