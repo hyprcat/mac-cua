@@ -708,7 +708,7 @@
         "Linux gate green (pure GhostCursorController palette + clampPointToWindow + per-window registry already testable)"
       ],
       "priority": 52,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

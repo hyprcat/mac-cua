@@ -172,4 +172,38 @@ final class GhostCursorTests: XCTestCase {
     func testClassifyScroll() {
         XCTAssertEqual(DeliveryPath.classify(message: "Scrolled element 2 down (1 page(s))"), .wheel)
     }
+
+    // MARK: GhostCursorGeometry (pure, US-051)
+
+    func testAppKitFrameFlipsYAgainstPrimaryHeight() {
+        // A 200x100 window at CG top-left (100, 50) on a 900-tall primary screen:
+        // bottom-left y = 900 - (50 + 100) = 750. x/w/h unchanged.
+        let cg = Rect(x: 100, y: 50, w: 200, h: 100)
+        let f = GhostCursorGeometry.appKitFrame(forCGRect: cg, primaryScreenHeight: 900)
+        XCTAssertEqual(f, Rect(x: 100, y: 750, w: 200, h: 100))
+    }
+
+    func testAppKitFrameTopOfScreen() {
+        // Window flush to the CG top (y=0) on an 800-tall screen → top in AppKit.
+        let cg = Rect(x: 0, y: 0, w: 400, h: 300)
+        let f = GhostCursorGeometry.appKitFrame(forCGRect: cg, primaryScreenHeight: 800)
+        XCTAssertEqual(f, Rect(x: 0, y: 500, w: 400, h: 300))
+    }
+
+    func testSpritePointInPanelFlipsWithinWindow() {
+        // Window CG rect (100,50,200,100). A CG point at the window's top-left
+        // corner (100,50) maps to panel-local (0, h)=(0,100) (bottom-left origin).
+        let rect = Rect(x: 100, y: 50, w: 200, h: 100)
+        XCTAssertEqual(
+            GhostCursorGeometry.spritePointInPanel(screenPoint: Point(x: 100, y: 50), windowCGRect: rect),
+            Point(x: 0, y: 100))
+        // The window's bottom-left CG corner (100, 150) → panel-local (0, 0).
+        XCTAssertEqual(
+            GhostCursorGeometry.spritePointInPanel(screenPoint: Point(x: 100, y: 150), windowCGRect: rect),
+            Point(x: 0, y: 0))
+        // Center (200, 100) → panel-local (100, 50).
+        XCTAssertEqual(
+            GhostCursorGeometry.spritePointInPanel(screenPoint: Point(x: 200, y: 100), windowCGRect: rect),
+            Point(x: 100, y: 50))
+    }
 }

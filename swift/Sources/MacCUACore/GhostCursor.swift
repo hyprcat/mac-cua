@@ -75,6 +75,31 @@ public protocol GhostCursorDriving: AnyObject {
     func move(windowId: Int, to point: Point, animated: Bool)
 }
 
+/// Pure ghost-cursor geometry helpers (Linux-testable). The overlay receives
+/// window rects + logical points in **CG global** coordinates (top-left origin,
+/// y grows downward — what `CaptureProvider.getWindowBounds` returns), but AppKit
+/// panels/layers live in **bottom-left** screen coordinates. These convert
+/// between the two so the AppKit impl owns no coordinate math of its own.
+public enum GhostCursorGeometry {
+    /// Convert a CG-global (top-left origin) window rect into an AppKit screen
+    /// frame (bottom-left origin). `primaryScreenHeight` is the height of the
+    /// primary display (the AppKit y-flip reference). Pure.
+    public static func appKitFrame(forCGRect cg: Rect, primaryScreenHeight: Double) -> Rect {
+        let flippedY = primaryScreenHeight - (cg.y + cg.h)
+        return Rect(x: cg.x, y: flippedY, w: cg.w, h: cg.h)
+    }
+
+    /// Position of a (window-clamped) CG-global point inside the panel's own
+    /// bottom-left local coordinate space, given the window's CG-global rect.
+    /// The panel origin is the window's top-left; inside the panel y is flipped.
+    /// Pure — used to place the sprite layer within the overlay panel.
+    public static func spritePointInPanel(screenPoint cg: Point, windowCGRect rect: Rect) -> Point {
+        let localX = cg.x - rect.x
+        let localY = rect.h - (cg.y - rect.y)
+        return Point(x: localX, y: localY)
+    }
+}
+
 /// Pure per-window ghost-cursor registry: assigns a rotating tint per window,
 /// tracks each window's screen frame, and clamps every move to that frame so a
 /// ghost can never paint over another app (§7.2). Linux-testable with a fake (or
