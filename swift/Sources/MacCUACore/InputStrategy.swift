@@ -285,6 +285,69 @@ public final class InputStrategy {
     public var activationPolicyForPopup: ActivationPolicy {
         .retryOnly
     }
+
+    // -----------------------------------------------------------------------
+    // C1 — click delivery order (pointer-first vs AX-first)
+    // -----------------------------------------------------------------------
+
+    /// Friendly roles for which pointer delivery may be preferred.
+    /// Mirrors `_POINTER_PREFERRED_ROLES`.
+    public static let pointerPreferredRoles: Set<String> = [
+        "button", "check box", "combo box", "link", "menu item",
+        "pop up button", "radio button", "row", "slider", "tab",
+        "text area", "text field",
+    ]
+
+    /// AX roles whose "buttonish" controls may be force-pointer'd when they
+    /// expose no AX activation action. Mirrors `_BUTTONISH_AX_ROLES`.
+    public static let buttonishAXRoles: Set<String> = [
+        "AXButton", "AXCheckBox", "AXMenuButton",
+        "AXPopUpButton", "AXRadioButton", "AXTab",
+    ]
+
+    /// AX actions that genuinely activate a control. Mirrors
+    /// `_AX_ACTIVATION_ACTIONS`.
+    public static let axActivationActions: Set<String> = [
+        "AXConfirm", "AXPick", "AXPress",
+    ]
+
+    /// A buttonish control that advertises actions but NONE of them activate
+    /// (e.g. web buttons whose AXPress is a no-op) must be clicked physically.
+    /// Mirrors `_should_force_pointer_for_node`.
+    public static func shouldForcePointerForNode(axRole: String, actionNames: Set<String>) -> Bool {
+        guard buttonishAXRoles.contains(axRole) else { return false }
+        guard !actionNames.isEmpty else { return false }
+        return actionNames.isDisjoint(with: axActivationActions)
+    }
+
+    /// Whether a left-click on this element should be delivered pointer-first
+    /// (physical CGEvent) rather than AX-first (`AXPress`). Mirrors
+    /// `_should_prefer_pointer_input`.
+    ///
+    /// Order:
+    ///   1. App-type/web policy says CGEvent for clicks  -> pointer.
+    ///   2. Role not pointer-preferred                   -> AX-first.
+    ///   3. Buttonish control with no activating action  -> pointer.
+    ///   4. Inside a web container                       -> pointer.
+    ///   5. Otherwise (native Cocoa control, menu item)  -> AX-first.
+    public func preferPointerForClick(
+        role: String,
+        axRole: String,
+        isWebArea: Bool = false,
+        hasWebAncestor: Bool = false,
+        actionNames: Set<String> = []
+    ) -> Bool {
+        if !shouldUseAXAction(.click, isWebArea: isWebArea || hasWebAncestor) {
+            return true
+        }
+        if !InputStrategy.pointerPreferredRoles.contains(role) {
+            return false
+        }
+        if InputStrategy.shouldForcePointerForNode(axRole: axRole, actionNames: actionNames) {
+            return true
+        }
+        return hasWebAncestor
+    }
 }
 
 // ---------------------------------------------------------------------------

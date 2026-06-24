@@ -185,6 +185,103 @@ final class InputStrategyTests: XCTestCase {
         XCTAssertNil(classifyLibraries("nothing relevant"))
     }
 
+    // MARK: - C1 click delivery order (pointer-first vs AX-first)
+
+    func testNativeCocoaControlIsAXFirst() {
+        let s = InputStrategy(appType: .nativeCocoa)
+        // A normal native button with a working AXPress -> AX-first.
+        XCTAssertFalse(s.preferPointerForClick(
+            role: "button", axRole: "AXButton", actionNames: ["AXPress"]))
+    }
+
+    func testMenuItemIsAXFirstWhereAXClicksWork() {
+        // Where the app-type click policy permits AX (native Cocoa, browser
+        // chrome), a menu item is AX-first: not buttonish, no web ancestor.
+        for t in [AppType.nativeCocoa, .browser] {
+            let s = InputStrategy(appType: t)
+            XCTAssertFalse(
+                s.preferPointerForClick(role: "menu item", axRole: "AXMenuItem"),
+                "\(t) menu item should be AX-first")
+        }
+        // In Electron the click policy is CGEvent for everything but focus, so
+        // even a menu item is delivered pointer-first (faithful to Python's
+        // should_use_ax_action gate running first).
+        XCTAssertTrue(
+            InputStrategy(appType: .electron).preferPointerForClick(
+                role: "menu item", axRole: "AXMenuItem"))
+    }
+
+    func testElectronControlIsPointerFirst() {
+        // Electron click policy -> CGEvent -> pointer-first regardless of role.
+        let s = InputStrategy(appType: .electron)
+        XCTAssertTrue(s.preferPointerForClick(
+            role: "button", axRole: "AXButton", actionNames: ["AXPress"]))
+    }
+
+    func testBrowserWebAreaControlIsPointerFirst() {
+        let s = InputStrategy(appType: .browser)
+        XCTAssertTrue(s.preferPointerForClick(
+            role: "button", axRole: "AXButton", isWebArea: true, actionNames: ["AXPress"]))
+    }
+
+    func testBrowserChromeNativeControlIsAXFirst() {
+        // Browser chrome (not web content) behaves like native Cocoa.
+        let s = InputStrategy(appType: .browser)
+        XCTAssertFalse(s.preferPointerForClick(
+            role: "button", axRole: "AXButton", isWebArea: false, actionNames: ["AXPress"]))
+    }
+
+    func testHasWebAncestorForcesPointerEvenInNativeApp() {
+        let s = InputStrategy(appType: .nativeCocoa)
+        XCTAssertTrue(s.preferPointerForClick(
+            role: "link", axRole: "AXLink", hasWebAncestor: true))
+    }
+
+    func testButtonishWithNoActivatingActionForcesPointer() {
+        let s = InputStrategy(appType: .nativeCocoa)
+        // Buttonish role advertising only non-activating actions -> pointer.
+        XCTAssertTrue(s.preferPointerForClick(
+            role: "button", axRole: "AXButton", actionNames: ["AXShowMenu"]))
+    }
+
+    func testNonPointerPreferredRoleIsAXFirst() {
+        let s = InputStrategy(appType: .nativeCocoa)
+        // A static-text-ish role isn't pointer-preferred -> AX-first.
+        XCTAssertFalse(s.preferPointerForClick(
+            role: "text", axRole: "AXStaticText", actionNames: ["AXPress"]))
+    }
+
+    func testShouldForcePointerForNodeMatrix() {
+        // Empty actions -> never force.
+        XCTAssertFalse(InputStrategy.shouldForcePointerForNode(axRole: "AXButton", actionNames: []))
+        // Non-buttonish role -> never force.
+        XCTAssertFalse(InputStrategy.shouldForcePointerForNode(
+            axRole: "AXMenuItem", actionNames: ["AXShowMenu"]))
+        // Buttonish + activating action present -> AX is fine, don't force.
+        XCTAssertFalse(InputStrategy.shouldForcePointerForNode(
+            axRole: "AXCheckBox", actionNames: ["AXPress", "AXShowMenu"]))
+        // Buttonish + only non-activating actions -> force pointer.
+        XCTAssertTrue(InputStrategy.shouldForcePointerForNode(
+            axRole: "AXRadioButton", actionNames: ["AXShowMenu"]))
+    }
+
+    func testForceSimulateMakesEveryClickPointerFirst() {
+        let s = InputStrategy(appType: .nativeCocoa, forceSimulate: true)
+        XCTAssertTrue(s.preferPointerForClick(
+            role: "button", axRole: "AXButton", actionNames: ["AXPress"]))
+        XCTAssertTrue(s.preferPointerForClick(role: "menu item", axRole: "AXMenuItem"))
+    }
+
+    func testAXFailureEscalationFlipsClickToPointerFirst() {
+        let s = InputStrategy(appType: .nativeCocoa)
+        XCTAssertFalse(s.preferPointerForClick(
+            role: "button", axRole: "AXButton", actionNames: ["AXPress"]))
+        s.recordAXFailure()
+        s.recordAXFailure()
+        XCTAssertTrue(s.preferPointerForClick(
+            role: "button", axRole: "AXButton", actionNames: ["AXPress"]))
+    }
+
     // MARK: - BackgroundCursor logical-position model
 
     func testMoveToUpdatesLogicalPositionOnly() {

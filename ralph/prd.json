@@ -99,7 +99,7 @@
         "swift build && swift test pass on Linux"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
