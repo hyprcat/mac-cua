@@ -203,6 +203,24 @@ public final class GhostCursorController: GhostCursorDriving {
         styles[windowId]
     }
 
+    /// Number of windows currently assigned a tint (live cursors). For tests.
+    public var trackedWindowCount: Int { styles.count }
+
+    /// Pick the next tint for a fresh window. To guarantee N concurrent sessions
+    /// render N *visually distinct* cursors (§7.3, K2), prefer the first palette
+    /// tint not currently in use by any live window; only once every tint is in
+    /// use (more live windows than palette entries) do we fall back to the
+    /// rotating index so the palette wraps deterministically. This means a tint
+    /// freed by `stopTracking` is immediately reusable, and two live windows can
+    /// never share a color until the palette is exhausted.
+    private func nextDistinctStyle() -> GhostCursorStyle {
+        let inUse = Set(styles.values.map { $0.name })
+        if let free = palette.first(where: { !inUse.contains($0.name) }) {
+            return free
+        }
+        return palette[nextStyleIndex % palette.count]
+    }
+
     /// Begin tracking a driven window: assign a tint (stable across calls) and
     /// announce it to the overlay. Idempotent — re-tracking keeps the same tint.
     @discardableResult
@@ -211,7 +229,7 @@ public final class GhostCursorController: GhostCursorDriving {
         if let existing = styles[windowId] {
             style = existing
         } else {
-            style = palette[nextStyleIndex % palette.count]
+            style = nextDistinctStyle()
             nextStyleIndex += 1
             styles[windowId] = style
         }

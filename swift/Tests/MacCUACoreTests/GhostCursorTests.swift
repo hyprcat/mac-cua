@@ -75,6 +75,43 @@ final class GhostCursorTests: XCTestCase {
         XCTAssertEqual(c.startTracking(windowId: 12).name, "a")  // wrapped
     }
 
+    // MARK: multi-cursor identity across concurrent sessions (US-053, K2)
+
+    func testNConcurrentWindowsGetNDistinctTints() {
+        let c = GhostCursorController()
+        let n = GhostCursorPalette.styles.count
+        var names: [String] = []
+        for w in 0..<n { names.append(c.startTracking(windowId: w).name) }
+        // N live windows (N == palette size) → N distinct colors, no collision.
+        XCTAssertEqual(Set(names).count, n)
+        XCTAssertEqual(c.trackedWindowCount, n)
+    }
+
+    func testFreedTintIsReusedByNextWindow() {
+        let c = GhostCursorController()
+        let s0 = c.startTracking(windowId: 100)  // first palette tint
+        _ = c.startTracking(windowId: 101)       // second palette tint
+        // Free window 100's tint; a brand-new window should reclaim it rather
+        // than skip to a third color (so two live windows stay distinct).
+        c.stopTracking(windowId: 100)
+        let reused = c.startTracking(windowId: 102)
+        XCTAssertEqual(reused, s0)
+        // The two currently-live windows (101, 102) remain distinct.
+        XCTAssertNotEqual(c.style(forWindowId: 101), c.style(forWindowId: 102))
+    }
+
+    func testLiveWindowsNeverCollideUntilPaletteExhausted() {
+        let c = GhostCursorController()
+        let palette = GhostCursorPalette.styles.count
+        // Open exactly palette-many windows → all distinct.
+        for w in 0..<palette { _ = c.startTracking(windowId: w) }
+        let liveTints = (0..<palette).compactMap { c.style(forWindowId: $0)?.name }
+        XCTAssertEqual(Set(liveTints).count, palette)
+        // One more window must reuse a color (palette exhausted) — deterministic.
+        let extra = c.startTracking(windowId: palette)
+        XCTAssertTrue(GhostCursorPalette.styles.contains(extra))
+    }
+
     func testStopTrackingForgetsWindow() {
         let overlay = FakeGhostOverlay()
         let c = GhostCursorController(overlay: overlay)
