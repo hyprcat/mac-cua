@@ -47,6 +47,4 @@ htmlcov/
 # Git worktrees
 .worktrees/
 
-# Docs and specs (kept locally, not in git)
-docs/
-specs/
+# Docs and specs are tracked (the Swift-port plan lives in docs/).
