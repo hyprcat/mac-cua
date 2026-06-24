@@ -54,3 +54,11 @@ Started: (stamped on first ./ralph.sh run)
 - Quality gate: `swift build` clean; `swift test` 407 passed / 0 fail (was 393).
 - Learnings: resolve selection offsets in UTF-16 code units, not Character offsets — AXSelectedTextRange is a CFRange so UTF-16 is what the Mac impl needs (a Character-based location would mis-place selections past any emoji/astral char). Disambiguation semantics: prefix = "preceding text ends with", suffix = "following text begins with" — adjacency to the match, not anywhere in the string.
 ---
+
+## US-006 — CGEvent field-constant table in Core
+- Implemented `swift/Sources/MacCUACore/CGEventFields.swift`: pure-integer named-constant namespaces, no CoreGraphics import (keeps Core Linux-green) — `CGEventFieldNumber` (mouse 0-5/7, keycode 9, scroll line 11/12/13, fixedPt 93/94/95, pointDelta 96/97/98, isContinuous 88, scrollPhase 99, windowUnderPointer 91 / ThatCanHandle 92, eventSourceStateID 45), `SkyLightEventField.pid=40`, `CGEventSourceStateIDValue` (Private=-1/Combined=0/HID=1), `CGMouseButtonNumber` (L0/R1/C2), `CGMouseEventSubtypeValue.tabletProximity=3`, `CGEventFlagMask` (Shift 0x20000/Control 0x40000/Alt 0x80000/Cmd 0x100000). Values verified against docs/CODEX_PARITY_CHANGES.md Appendix. The Mac impl maps these onto CGEventField(rawValue:)/CGEventFlags.
+- Tests: `swift/Tests/MacCUACoreTests/CGEventFieldsTests.swift` (13 cases asserting every numeric value matches the Appendix exactly).
+- Sub-agents used: none — small contained pure-constants story done directly in main thread (matches US-001..005 sizing).
+- Quality gate: `swift build` clean; `swift test` 420 passed / 0 fail (was 407).
+- Learnings: declare CGEvent field numbers as plain UInt32 constants in Core (not CGEventField, which would pull in CoreGraphics and break the Linux build). The Mac input layer does the CGEventField(rawValue:) wrap. SkyLight's pid field (40) is a SLEventSetIntegerValueField field number — distinct namespace from the CGEventField table, so keep them in separate enums to avoid the impl confusing them.
+---
