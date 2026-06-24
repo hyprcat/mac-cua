@@ -161,6 +161,19 @@ We already have the mechanism (`guidance` / `app_specific_instructions` / `guida
 
 ---
 
+## L. Caching & perf notes **[NEW]**
+- **L1. Request/turn-scoped caching.** Cache `PID → AppState` within a turn/batch and `name → PID` lookups across calls (macos-cua's two-layer request-scoped cache). Especially valuable inside `batch` (reuse the pre-action tree instead of re-walking). Request-scoped lifetime is a clean fit for stateless MCP-over-stdio. Pure/cheap → Linux-testable. (Distinct from §B2, which caches the `SCContentFilter` itself.)
+- **L2. Per-turn snapshot beats per-action screenshot — quantified.** macos-cua's own benchmark: removing auto-screenshot-after-every-action in favor of an explicit per-turn `get_app_state` gave **~3.8–4.3× faster turns**. This *validates* our design (Invariant 21 + a separate `get_app_state` tool) — carry it forward, don't regress to screenshot-per-action.
+- **L3. Capture latency reference (macOS 26, Apple Silicon).** Shell `screencapture`+`sips` p50 **608 ms** → `CGDisplayCreateImage`+ImageIO `maxPixelSize` **61 ms** (fastest) → SCK-via-shim **82 ms**. SCK was ~15–25 ms *slower* than `CGDisplayCreateImage` for one-shot grabs. Lesson: don't assume SCK is fastest for our on-demand single shot — measure the CGDisplay/SkyLight window-scoped path first (§B4).
+
+## M. Considered & deferred (recorded so they are not re-litigated) **[decisions]**
+- **M1. Code-mode / sandbox (PTC) — DEFER/SKIP.** macos-cua runs model-authored TS in an isolated-vm sandbox (esbuild transpile, screenshot handles) to collapse N tool calls into one code run. Biggest round-trip win, but needs an embedded JS engine with no Swift-stdlib equivalent. The `batch` tool (§D3) captures ~80% of the round-trip benefit at ~5% of the cost → ship `batch`, skip the sandbox unless PTC is explicitly wanted.
+- **M2. Zoom tool — SKIP (low value for AX-first).** macos-cua's `zoom` crops a screenshot region and re-annotates element marks to fix *pixel-coordinate* guessing on small targets. Our element-index design has no pixel-guessing failure mode, so zoom's primary motivation is absent. Reconsider only if a future coordinate path needs it.
+- **M3. Passive memory / Codex `chronicle` — OUT OF SCOPE (note only).** Codex ships a separate passive sidecar: background screen-recording → Vision OCR → 10-min/6-h work summaries, with privacy exclusions (incognito/private/Meet). It is *context/memory*, orthogonal to live control. Not part of the CUA port; revisit only as a deliberate separate feature (and behind the same privacy-exclusion policy if ever built).
+- **M4. macos-cua's weaker choices we deliberately do NOT copy** (also see §J): their `stableElementKey = role|label|frame` and "re-walk to the same preorder index" refetch (both break when the tree changes — our GraphLocator is stronger); their integer-only scroll deltas; their global `CGEventPost` default + "activate-without-raise"; their whole-display capture (can't see occluded windows).
+
+---
+
 ## Mapping to our architecture
 
 | Area | Provider seam (Providers.swift) | Phase | Linux-testable now? |
