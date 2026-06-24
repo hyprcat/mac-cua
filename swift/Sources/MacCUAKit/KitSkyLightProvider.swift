@@ -15,6 +15,7 @@
 
 #if os(macOS)
 import Foundation
+import AppKit
 import CoreGraphics
 import MacCUACore
 import CSkyLightShim
@@ -95,6 +96,87 @@ public final class KitSkyLightProvider: SkyLightProviding {
         WindowOwnerValidator.validate(
             windowId: windowId, expectedPid: expectedPid, lookups: self
         )
+    }
+
+    // MARK: - Targeted mouse delivery (US-030; C2)
+
+    /// Build an NSEvent-backed, SkyLight-stamped mouse event and post it to the
+    /// background target pid — no cursor warp, no foregrounding.
+    ///
+    /// The event is created via `+[NSEvent mouseEventWithType:...windowNumber:...]`
+    /// so the window server associates it with `windowId`; its `.cgEvent` is then
+    /// stamped per `SkyLightMouseDelivery` (subtype 7=3, window hints 91/92=windowId,
+    /// window-local coords via `CGEventSetWindowLocation`, target pid in field 40
+    /// via `SLEventSetIntegerValueField`) and posted with `SLEventPostToPid`.
+    ///
+    /// Returns `false` (caller falls through to the CGEvent base path, US-028) when
+    /// the SkyLight mouse capability is unavailable or any step fails — it NEVER
+    /// foregrounds on failure (Inv 18).
+    ///
+    /// - Parameters:
+    ///   - windowLocalPoint: the click point in the target window's coordinate
+    ///     space (origin top-left, as the rest of the input layer uses).
+    @discardableResult
+    public func deliverMouse(
+        pid: Int, windowId: Int,
+        windowLocalPoint: CGPoint, type: CGEventType,
+        button: CGMouseButton, clickCount: Int,
+        pressure: Double, eventNumber: Int,
+        modifierFlags: NSEvent.ModifierFlags = []
+    ) -> Bool {
+        guard capabilities.canDeliverMouse,
+              let post = fnEventPostToPid,
+              let setSkyInt = fnEventSetIntegerValueField,
+              let setWindowLocation = fnEventSetWindowLocation else { return false }
+
+        guard let nsType = Self.nsMouseType(for: type) else { return false }
+
+        guard let nsEvent = NSEvent.mouseEvent(
+            with: nsType, location: windowLocalPoint, modifierFlags: modifierFlags,
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowId,
+            context: nil, eventNumber: eventNumber, clickCount: clickCount,
+            pressure: Float(pressure)),
+              let event = nsEvent.cgEvent else { return false }
+
+        // For non-left buttons NSEvent encodes the button via the event type; make
+        // the button number explicit so the routed event carries it.
+        event.setIntegerValueField(
+            CGEventField(rawValue: CGEventFieldNumber.mouseEventButtonNumber)!,
+            value: Int64(button.rawValue))
+
+        // Public CGEvent stamps: subtype=3 + window-association hints (91/92).
+        for stamp in SkyLightMouseDelivery.cgStamps(windowId: windowId) {
+            event.setIntegerValueField(
+                CGEventField(rawValue: stamp.field)!, value: stamp.value)
+        }
+
+        // Window-local placement (SkyLight export) — routing metadata, not a warp.
+        setWindowLocation(event, windowLocalPoint)
+
+        // Private SkyLight stamp: target pid in field 40, then post to that pid.
+        for stamp in SkyLightMouseDelivery.skyStamps(pid: pid) {
+            setSkyInt(event, stamp.field, stamp.value)
+        }
+        post(Int32(pid), event)
+        return true
+    }
+
+    /// Map a `CGEventType` to the AppKit `NSEvent.EventType` that
+    /// `mouseEventWithType:` accepts. Non-mouse types return `nil`.
+    private static func nsMouseType(for type: CGEventType) -> NSEvent.EventType? {
+        switch type {
+        case .leftMouseDown: return .leftMouseDown
+        case .leftMouseUp: return .leftMouseUp
+        case .leftMouseDragged: return .leftMouseDragged
+        case .rightMouseDown: return .rightMouseDown
+        case .rightMouseUp: return .rightMouseUp
+        case .rightMouseDragged: return .rightMouseDragged
+        case .otherMouseDown: return .otherMouseDown
+        case .otherMouseUp: return .otherMouseUp
+        case .otherMouseDragged: return .otherMouseDragged
+        case .mouseMoved: return .mouseMoved
+        default: return nil
+        }
     }
 
     #if DEBUG
