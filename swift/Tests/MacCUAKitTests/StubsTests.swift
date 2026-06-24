@@ -95,5 +95,17 @@ final class StubsTests: XCTestCase {
         // it must return without crashing (id is host-dependent / may be nil).
         _ = KitCaptureProvider().findWindowIdForAXWindow(pid: -1, axWindow: KitAXElementRef())
     }
+
+    func testTextGeometrySeamsAreNilForEmptyRefNonActivating() {
+        // US-021 (A5): the parameterized text-geometry reads on a node with no
+        // backing AXUIElement must fail honestly (nil), never crash, never
+        // foreground. The real bounds/range reads need live text elements
+        // (MANUAL-VERIFY in TextEdit/Safari).
+        let p = KitAccessibilityProvider()
+        let n = Node(index: 0, role: "text field", depth: 0, axRef: KitAXElementRef())
+        XCTAssertNil(p.boundsForTextRange(node: n, range: MacCUACore.TextRange(location: 0, length: 3)))
+        XCTAssertNil(p.rangeForTextPosition(node: n, x: 10, y: 20))
+        XCTAssertNil(p.visibleTextRange(node: n))
+    }
 }
 #endif

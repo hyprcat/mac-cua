@@ -230,6 +230,13 @@ public protocol AccessibilityProvider: AnyObject {
     func getAttributeValue(_ element: AXElementRef, _ attr: String) -> String?
     func isAttributeSettable(node: Node, _ attr: String) -> Bool
 
+    // Text geometry (A5, US-021): parameterized attributes for "where is this
+    // text on screen". On-screen bounds of a character range, the range at a
+    // point, and the currently-visible range. Read-only: never focuses/raises.
+    func boundsForTextRange(node: Node, range: TextRange) -> Rect?
+    func rangeForTextPosition(node: Node, x: Double, y: Double) -> TextRange?
+    func visibleTextRange(node: Node) -> TextRange?
+
     // Writes (pid-scoped, ref-counted assertions)
     func performAction(node: Node, action: String) throws
     func performActionOnRef(_ axRef: AXElementRef, action: String) throws
@@ -251,6 +258,12 @@ public extension AccessibilityProvider {
     /// Default: no private SPI (fakes, Linux). Callers fall back to bounds/title
     /// matching via `WindowMatcher`.
     func windowIdForElement(_ axRef: AXElementRef) -> Int? { nil }
+
+    /// Defaults: no parameterized text geometry (fakes, Linux). The real
+    /// parameterized-attribute reads live in MacCUAKit (US-021).
+    func boundsForTextRange(node: Node, range: TextRange) -> Rect? { nil }
+    func rangeForTextPosition(node: Node, x: Double, y: Double) -> TextRange? { nil }
+    func visibleTextRange(node: Node) -> TextRange? { nil }
 }
 
 // MARK: - InputProvider (input.py)

@@ -368,6 +368,39 @@ public final class KitAccessibilityProvider: AccessibilityProvider {
             && settable.boolValue
     }
 
+    // MARK: Text geometry (A5, US-021) — parameterized attributes
+
+    public func boundsForTextRange(node: Node, range: MacCUACore.TextRange) -> Rect? {
+        guard let el = axElement(node.axRef) else { return nil }
+        var cf = CFRange(location: range.location, length: range.length)
+        guard let param = AXValueCreate(.cfRange, &cf) else { return nil }
+        guard let v = copyParameterizedAXValue(
+            el, "AXBoundsForRange" as CFString, param) else { return nil }
+        var rect = CGRect.zero
+        guard AXValueGetValue(v, .cgRect, &rect) else { return nil }
+        return Rect(x: Double(rect.origin.x), y: Double(rect.origin.y),
+                    w: Double(rect.size.width), h: Double(rect.size.height))
+    }
+
+    public func rangeForTextPosition(node: Node, x: Double, y: Double) -> MacCUACore.TextRange? {
+        guard let el = axElement(node.axRef) else { return nil }
+        var pt = CGPoint(x: x, y: y)
+        guard let param = AXValueCreate(.cgPoint, &pt) else { return nil }
+        guard let v = copyParameterizedAXValue(
+            el, "AXRangeForPosition" as CFString, param) else { return nil }
+        var cf = CFRange(location: 0, length: 0)
+        guard AXValueGetValue(v, .cfRange, &cf) else { return nil }
+        return MacCUACore.TextRange(location: cf.location, length: cf.length)
+    }
+
+    public func visibleTextRange(node: Node) -> MacCUACore.TextRange? {
+        guard let el = axElement(node.axRef),
+              let v = copyAXValue(el, "AXVisibleCharacterRange") else { return nil }
+        var cf = CFRange(location: 0, length: 0)
+        guard AXValueGetValue(v, .cfRange, &cf) else { return nil }
+        return MacCUACore.TextRange(location: cf.location, length: cf.length)
+    }
+
     // MARK: Writes (US-036 / US-018) — deferred
 
     public func performAction(node: Node, action: String) throws {
@@ -424,6 +457,15 @@ public final class KitAccessibilityProvider: AccessibilityProvider {
     private func copyAXValue(_ el: AXUIElement, _ attr: String) -> AXValue? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(el, attr as CFString, &value) == .success,
+              let raw = value, CFGetTypeID(raw) == AXValueGetTypeID() else { return nil }
+        return (raw as! AXValue)
+    }
+
+    private func copyParameterizedAXValue(
+        _ el: AXUIElement, _ attr: CFString, _ param: AXValue
+    ) -> AXValue? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(el, attr, param, &value) == .success,
               let raw = value, CFGetTypeID(raw) == AXValueGetTypeID() else { return nil }
         return (raw as! AXValue)
     }
