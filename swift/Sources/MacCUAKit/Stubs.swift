@@ -81,9 +81,19 @@ public final class KitCaptureProvider: CaptureProvider {
     // listWindows/getWindowBounds/getWindowPid: real impl in KitCaptureProvider.swift (US-022).
     // findWindowIdForAXWindow: real impl in KitWindowBinding.swift (US-020, A4).
     // captureWindow: real SCK impl in KitCaptureProvider.swift (US-022).
-    /// Real Screen-Recording preflight (US-015): query without prompting.
+    /// Real Screen-Recording preflight (US-015/US-026): query without
+    /// prompting. Primary is `CGPreflightScreenCaptureAccess`; if it reports no
+    /// access we fall back to the window-name heuristic (ported from
+    /// `screenshot.check_screen_recording_permission`) — without the grant the
+    /// window list returns windows with stripped names, so a single non-empty
+    /// name proves access. Read-only, never foregrounds.
     public func checkScreenRecordingPermission() -> Bool {
-        CGPreflightScreenCaptureAccess()
+        if CGPreflightScreenCaptureAccess() { return true }
+        guard let raw = CGWindowListCopyWindowInfo(
+            [.optionAll], kCGNullWindowID) as? [[String: Any]]
+        else { return false }
+        let names = raw.map { $0[kCGWindowName as String] as? String }
+        return PermissionsLogic.screenRecordingGrantedFromWindowNames(names)
     }
 
     /// Real Screen-Recording request (US-015): surfaces the system dialog on

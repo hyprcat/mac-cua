@@ -267,14 +267,16 @@ public final class KitAppResolver: AppResolver {
 
     // MARK: - Permissions
 
-    /// Real Accessibility-trust check (US-015). `prompt: true` surfaces the
-    /// system Accessibility dialog (non-blocking); `false` just queries. Never
-    /// foregrounds — `AXIsProcessTrustedWithOptions` only reads/raises the
-    /// settings prompt.
+    /// Real Accessibility-trust check (US-015/US-026). `prompt: true` surfaces
+    /// the system Accessibility dialog (non-blocking) via
+    /// `AXIsProcessTrustedWithOptions`; `false` takes the cheaper
+    /// `AXIsProcessTrusted()` query. Both only read current trust state — never
+    /// foreground (the dialog is the system Settings prompt, not our window).
     public func checkAccessibilityPermission(prompt: Bool) -> Bool {
+        guard prompt else { return AXIsProcessTrusted() }
         // `kAXTrustedCheckOptionPrompt` is a non-Sendable global under Swift 6
         // strict concurrency; its documented value is the literal below.
-        let options = ["AXTrustedCheckOptionPrompt": prompt] as CFDictionary
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
         return AXIsProcessTrustedWithOptions(options)
     }
 
