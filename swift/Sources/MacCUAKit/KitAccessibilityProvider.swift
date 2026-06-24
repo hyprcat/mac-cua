@@ -401,18 +401,85 @@ public final class KitAccessibilityProvider: AccessibilityProvider {
         return MacCUACore.TextRange(location: cf.location, length: cf.length)
     }
 
-    // MARK: Writes (US-036 / US-018) — deferred
+    // MARK: Writes (US-036) — pure-AX actions + typed attribute sets
 
+    /// Perform an AX action on a Node (ports `accessibility.perform_action`).
+    /// Ref-counts a `performActions` assertion (balanced even on throw), maps
+    /// `-25205`/`-25212` to a stale-reference error (Inv 10), and NEVER focuses,
+    /// raises or activates — `AXUIElementPerformAction` acts on the app's own
+    /// element tree without touching the window stack (Prime Invariant / Inv 7).
     public func performAction(node: Node, action: String) throws {
-        throw AutomationError.ax("KitAccessibilityProvider.performAction not implemented (US-036)")
+        guard let el = axElement(node.axRef) else {
+            throw AutomationError.ax("Node has no AX reference")
+        }
+        let pid = node.elementPid
+        try withWriteAssertion(pid: pid, kind: .performActions) {
+            let err = AXUIElementPerformAction(el, action as CFString)
+            if err != .success {
+                throw axError(Int(err.rawValue), context: "perform action \(action)")
+            }
+        }
     }
 
+    /// Perform an AX action on a raw element ref (no Node wrapper, no assertion —
+    /// ports `accessibility.perform_action_on_ref`). Used by hit-test paths that
+    /// already hold the element directly.
     public func performActionOnRef(_ axRef: AXElementRef, action: String) throws {
-        throw AutomationError.ax("KitAccessibilityProvider.performActionOnRef not implemented (US-036)")
+        guard let el = axElement(axRef) else {
+            throw AutomationError.ax("No AX reference")
+        }
+        let err = AXUIElementPerformAction(el, action as CFString)
+        if err != .success {
+            throw axError(Int(err.rawValue), context: "perform action \(action)")
+        }
     }
 
+    /// Set an AX attribute on a Node (ports `accessibility.set_attribute`).
+    /// Ref-counts a `writeAttributes` assertion, coerces the string value to the
+    /// AX-typed CFTypeRef via the pure `AXAttributeWrite.classify` (booleans →
+    /// CFBoolean, AXSelectedText/VisibleCharacterRange → AXValue `.cfRange`, else
+    /// CFString — the "AXValue-typed ranges" of the story), and maps stale codes.
+    /// Pure-AX: never focuses/raises (the optional focus step lives in the spine
+    /// handler, gated, AFTER this throws).
     public func setAttribute(node: Node, _ attr: String, _ value: String) throws {
-        throw AutomationError.ax("KitAccessibilityProvider.setAttribute not implemented (US-036)")
+        guard let el = axElement(node.axRef) else {
+            throw AutomationError.ax("Node has no AX reference")
+        }
+        let cfValue = Self.cfValue(for: AXAttributeWrite.classify(attr: attr, value: value))
+        let pid = node.elementPid
+        try withWriteAssertion(pid: pid, kind: .writeAttributes) {
+            let err = AXUIElementSetAttributeValue(el, attr as CFString, cfValue)
+            if err != .success {
+                throw axError(Int(err.rawValue), context: "set attribute \(attr)")
+            }
+        }
+    }
+
+    /// Map the pure `AXWriteValue` classification onto the concrete CFTypeRef the
+    /// AX framework expects.
+    private static func cfValue(for v: AXWriteValue) -> CFTypeRef {
+        switch v {
+        case let .string(s):
+            return s as CFString
+        case let .boolean(b):
+            return b ? kCFBooleanTrue : kCFBooleanFalse
+        case let .range(location, length):
+            var cf = CFRange(location: location, length: length)
+            if let ax = AXValueCreate(.cfRange, &cf) { return ax }
+            // Extremely unlikely; degrade to a string the framework will reject
+            // honestly rather than crash.
+            return "\(location),\(length)" as CFString
+        }
+    }
+
+    /// Run `body` holding a PID-scoped write/action assertion, balanced even on
+    /// throw. When the element has no resolvable pid we still perform the write
+    /// (matches Python: the assertion is skipped, the AX call is not).
+    private func withWriteAssertion(
+        pid: Int?, kind: AXEnablementKind, _ body: () throws -> Void
+    ) throws {
+        guard let pid else { try body(); return }
+        try assertions.withAssertion(pid: pid, kind: kind, body)
     }
 
     // MARK: Editable text + content extraction (US-033 / US-040 / US-046)
