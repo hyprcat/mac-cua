@@ -107,5 +107,22 @@ final class StubsTests: XCTestCase {
         XCTAssertNil(p.rangeForTextPosition(node: n, x: 10, y: 20))
         XCTAssertNil(p.visibleTextRange(node: n))
     }
+
+    func testCaptureWindowOnBogusWindowIsNilNonActivating() throws {
+        // US-022 (B1/B5): capturing a non-existent window id must fail honestly
+        // (nil) — no SCWindow match — never crash, never foreground. Real
+        // occluded-window capture is MANUAL-VERIFY against live apps.
+        let p = KitCaptureProvider()
+        XCTAssertNil(try p.captureWindow(windowId: -1, includeCursor: false))
+    }
+
+    func testWindowMetadataReadsAreWellFormed() {
+        // listWindows / getWindowBounds / getWindowPid are read-only window-server
+        // snapshots; a bogus id yields nil, never crashes/foregrounds.
+        let p = KitCaptureProvider()
+        XCTAssertNil(p.getWindowBounds(windowId: -1))
+        XCTAssertNil(p.getWindowPid(windowId: -1))
+        _ = p.listWindows(ownerPid: -1) // host-dependent count; must not crash
+    }
 }
 #endif

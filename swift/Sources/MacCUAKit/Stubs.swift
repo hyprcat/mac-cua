@@ -38,12 +38,7 @@ public final class KitEventSource: EventSource {
     public init() {}
 }
 
-/// Real Kit handle wrapping a captured `CGImage` (US-022). Stub for now.
-public final class KitCapturedImage: CapturedImage {
-    public var width: Int { unimplemented() }
-    public var height: Int { unimplemented() }
-    public func pngBase64() -> String { unimplemented() }
-}
+// KitCapturedImage: real impl in KitCaptureProvider.swift (US-022).
 
 /// Real Kit `EditableTextObject` wrapper (US-033/US-040). Stub for now.
 public final class KitEditableText: EditableText {
@@ -75,11 +70,9 @@ public final class KitInputProvider: InputProvider {
 
 public final class KitCaptureProvider: CaptureProvider {
     public init() {}
-    public func listWindows(ownerPid: Int?) -> [WindowInfo] { [] }
-    public func getWindowBounds(windowId: Int) -> Rect? { nil }
-    public func getWindowPid(windowId: Int) -> Int? { nil }
+    // listWindows/getWindowBounds/getWindowPid: real impl in KitCaptureProvider.swift (US-022).
     // findWindowIdForAXWindow: real impl in KitWindowBinding.swift (US-020, A4).
-    public func captureWindow(windowId: Int, includeCursor: Bool) throws -> CapturedImage? { unimplemented() }
+    // captureWindow: real SCK impl in KitCaptureProvider.swift (US-022).
     /// Real Screen-Recording preflight (US-015): query without prompting.
     public func checkScreenRecordingPermission() -> Bool {
         CGPreflightScreenCaptureAccess()
