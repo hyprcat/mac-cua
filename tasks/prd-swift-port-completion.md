@@ -522,7 +522,7 @@ Ordered by dependency. Phase A (🟢 pure logic) first — highest confidence, u
 - **Release-parity-first intermediate:** per the user's choice we target the experimental confirmed-delivery pipeline directly; we do **not** first build a release-branch-faithful intermediate.
 - **AXObserver as a correctness mechanism:** deliberately not ported as a gate (§5.3). Optional latency hint only.
 - **Re-enabling inline post-delivery AX verification on primary paths** (FR-21): do not "fix" this back.
-- **Porting product telemetry/analytics verbatim** unless the spine depends on it (US-013 records the decision).
+- **Porting product telemetry/analytics verbatim** unless the spine depends on it (US-013 records the decision). *US-013 outcome:* `analytics.py` call sites are kept as the `Analytics` protocol (+ a `BufferingAnalytics` mirroring the events/flush buffer); `tracing.py` (OSSignposter-equivalent timing spans) is **out of scope** — it is observability-only and the spine does not depend on it, so it is intentionally not ported.
 
 **Anti-regression (do NOT copy macos-cua's weaker choices — M4 / §J):** `role|label|frame` element keys, "re-walk to same preorder index" refetch, integer-only scroll deltas, global `CGEventPost` default, "activate-without-raise", whole-display capture. US-012 guards these.
 
@@ -552,7 +552,7 @@ Ordered by dependency. Phase A (🟢 pure logic) first — highest confidence, u
 
 - **MCP Swift SDK maturity** — confirm stdio transport + the exact content-block shapes we need (resolve in Phase B / US-015).
 - **Enhanced-UI side effects** — which apps shift layout/perf when `AXEnhancedUserInterface` is set? Per-app remembered policy (US-019) must enumerate exceptions during manual verify.
-- **`elicitation.py`** — does the Swift MCP SDK support elicitation prompts, or do we defer? (US-013 records the call.)
+- **`elicitation.py`** — *Resolved (US-013):* the pure approval-store logic (session + persistent + denied + RISK_WARNING) is ported to `Server/Support.AppApprovalStore` with an injected `ApprovalStorage` seam (filesystem default, Linux-pure). The **interactive MCP elicitation prompt** itself is **deferred to the executable/MCP layer (US-015)** — until then the spine auto-approves on first use, exactly as before.
 - **Capture path winner** — CGDisplay-window-scoped vs SCK one-shot on the target Mac (US-023 benchmark decides; affects US-022/024).
 - **`AttributedRun` adapter** — exact NSAttributedString → run mapping for the markdown writer (US-001 defines the seam; Phase 4/5 implements).
 
@@ -588,7 +588,10 @@ Ordered by dependency. Phase A (🟢 pure logic) first — highest confidence, u
 | `selection.py` | 376 | Kit/Selection | ❌ not started | US-040 |
 | `session.py` | 3803 | Server/SessionManager | ✅ done | — |
 | `server.py`/`main.py` | — | mac-cua exe | ❌ not started | US-015 |
-| `analytics/tracing/lifecycle/elicitation.py` | ~ | TBD | ⚠️ audit | **US-013** |
+| `analytics.py` | 68 | Server/Support | ✅ ported (`Analytics`/`BufferingAnalytics`) | US-013 |
+| `lifecycle.py` | 59 | Server/Support | ✅ ported (`SessionLifecycle`/`TurnMetadata`) | US-013 |
+| `elicitation.py` | 78 | Server/Support | ✅ ported (`AppApprovalStore` + persistence); interactive prompts → US-015 | US-013 |
+| `tracing.py` | 105 | — | ⏭️ out of scope (observability-only timing spans; spine does not depend) — §6/§9 | US-013 |
 
 **Every Codex-parity item** (A–M) → story: A1→US-019, A2→US-046, A3→US-018, A4→US-020, A5→US-021 · B1→US-022, B2→US-024, B3→US-024, B4→US-023, B5→US-022, B6→US-023 · C1→US-007/032, C2→US-030, C3→US-031, C4→US-035, C5→US-028, C6→US-031, C7→US-033, C8→US-042 · D1→US-005/040, D2→US-041, D3→US-008, D4→US-009, D5→US-034 · E1→US-002, E2→US-038, E3→US-003 · F→US-011/039 · G→US-047/048 · H→US-051–055 · I→US-049 · J/M4→US-012 · K1→**Non-Goal** · K2→US-053/056 · L1→US-004, L2→FR-21 (guard), L3→US-023 · M1/M2/M3→**Non-Goals**.
 
