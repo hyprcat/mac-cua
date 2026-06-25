@@ -125,7 +125,6 @@ public final class AppApprovalStore {
 public struct TurnMetadata {
     public let turnId: String
     public let startedAt: Double
-    public var stepCount: Int = 0
     public var appsUsed: Set<String> = []
 
     public init(turnId: String, startedAt: Double = 0) {
@@ -134,17 +133,16 @@ public struct TurnMetadata {
     }
 }
 
-/// Tracks per-session activity, the loop step limit, and optional per-turn
-/// metadata. Mirrors `app/_lib/lifecycle.SessionLifecycle`.
+/// Tracks per-session activity and optional per-turn metadata.
+/// Mirrors `app/_lib/lifecycle.SessionLifecycle`.
+///
+/// NOTE: The loop step limit was intentionally removed — managing the agent's
+/// own context/loop length is the agent's responsibility, not the server's.
 public final class SessionLifecycle {
-    public let stepLimit: Int
-    private(set) public var stepCount: Int = 0
     private(set) public var usedApps: [String] = []
     private(set) public var currentTurn: TurnMetadata?
 
-    public init(stepLimit: Int) {
-        self.stepLimit = stepLimit
-    }
+    public init() {}
 
     public func startTurn(_ turnId: String, startedAt: Double = 0) {
         currentTurn = TurnMetadata(turnId: turnId, startedAt: startedAt)
@@ -159,16 +157,6 @@ public final class SessionLifecycle {
             usedApps.append(bundleId)
         }
         currentTurn?.appsUsed.insert(bundleId)
-    }
-
-    public func incrementStep() {
-        stepCount += 1
-        currentTurn?.stepCount += 1
-    }
-
-    /// True once the limit is reached. `stepLimit <= 0` disables the limit.
-    public func checkStepLimit() -> Bool {
-        stepLimit > 0 && stepCount >= stepLimit
     }
 }
 

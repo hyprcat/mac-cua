@@ -96,27 +96,20 @@ final class FlagsTests: XCTestCase {
 
     func testWorkaroundDefaults() {
         let w = WorkaroundFlags()
-        XCTAssertEqual(w.loopStepLimit, 20)
         XCTAssertFalse(w.meetingNotesInCalendar)
         XCTAssertFalse(w.shortenLinksForDemo)
     }
 
     func testWorkaroundConfigAndEnv() {
         let config: [String: Any] = [
-            "workarounds": ["loop_step_limit": 5, "shorten_links_for_demo": true]
+            "workarounds": ["meeting_notes_in_calendar": true, "shorten_links_for_demo": true]
         ]
         let w = WorkaroundFlags.load(config: config, env: { _ in nil })
-        XCTAssertEqual(w.loopStepLimit, 5)
+        XCTAssertTrue(w.meetingNotesInCalendar)
         XCTAssertTrue(w.shortenLinksForDemo)
 
-        let env = ["MAC_CUA_WORKAROUND_LOOP_STEP_LIMIT": "42"]
+        let env = ["MAC_CUA_WORKAROUND_SHORTEN_LINKS_FOR_DEMO": "false"]
         let w2 = WorkaroundFlags.load(config: config, env: { env[$0] })
-        XCTAssertEqual(w2.loopStepLimit, 42, "env int override should win")
-    }
-
-    func testWorkaroundInvalidIntEnvIgnored() {
-        let env = ["MAC_CUA_WORKAROUND_LOOP_STEP_LIMIT": "notanint"]
-        let w = WorkaroundFlags.load(env: { env[$0] })
-        XCTAssertEqual(w.loopStepLimit, 20, "invalid int env should be ignored")
+        XCTAssertFalse(w2.shortenLinksForDemo, "env override should win")
     }
 }

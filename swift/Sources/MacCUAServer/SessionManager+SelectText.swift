@@ -28,12 +28,6 @@ extension SessionManager {
             try checkSafety(session.target.bundleId)
             checkApproval(session.target.bundleId)
             lifecycle.trackAppUsed(session.target.bundleId)
-            lifecycle.incrementStep()
-            if lifecycle.checkStepLimit() {
-                throw AutomationError.stepLimit(
-                    "Step limit reached (\(workarounds.loopStepLimit)). "
-                    + "End your current loop and summarize progress.")
-            }
 
             previousFrontmost = providers.apps.getFrontmostApp()
 

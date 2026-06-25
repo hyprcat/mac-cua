@@ -131,6 +131,20 @@ public final class RefetchableTree {
         return nodesStorage
     }
 
+    /// Unconditional re-walk, bypassing the `isInvalidated` fast path. Needed
+    /// after a mutating action (programmatic AXValue set / AX-press) that may not
+    /// fire the AX notifications the settle monitor watches — without this the
+    /// cache would keep returning stale node values to both the verifier and the
+    /// returned snapshot. Updates the cache and resets the monitor on success.
+    @discardableResult
+    public func forceRewalk() -> [Node] {
+        if let newNodes = rewalk() {
+            nodesStorage = newNodes
+            monitor?.reset()
+        }
+        return nodesStorage
+    }
+
     /// Mirrors `element(index)`. Look up an element by index, refetching if the
     /// graph generation moved, the graph is closed/reopening, or the tree was
     /// invalidated.

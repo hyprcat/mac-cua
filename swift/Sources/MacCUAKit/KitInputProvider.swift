@@ -197,21 +197,31 @@ public final class KitInputProvider: InputProvider {
     /// sequence is the same pure `ClickDelivery` plan as the CGEvent path.
     private func trySkyLightClick(
         pid: Int, windowId: Int, windowLocalPoint: CGPoint,
-        button: MouseButton, count: Int
+        button: MouseButton, count: Int, includePrimer: Bool
     ) -> Bool {
         guard let sky = skyLight, sky.capabilities.canDeliverMouse else { return false }
         let (downType, upType) = mouseEventTypes(for: button)
         let btn = CGMouseButton(rawValue: button.buttonNumber)!
+        // US-057: window-local off-screen point for the Chromium user-activation
+        // primer. The decoy travels the SAME trusted SkyLight channel as the real
+        // click (so Chromium honors it) but lands at a coordinate no window claims
+        // — Chromium discards the gesture yet ticks the user-activation gate.
+        // Off-screen + pid-scoped: no cursor warp, no foreground (Inv 18).
+        let primerPoint = CGPoint(x: -1, y: -1)
 
-        for step in ClickDelivery.sequence(count: count) {
+        for step in ClickDelivery.sequence(count: count, includePrimer: includePrimer) {
             let type = step.phase == .down ? downType : upType
             if step.phase == .down, step.clickState > 1 { Thread.sleep(forTimeInterval: 0.1) }
+            let point = step.isPrimer ? primerPoint : windowLocalPoint
             let delivered = sky.deliverMouse(
-                pid: pid, windowId: windowId, windowLocalPoint: windowLocalPoint,
+                pid: pid, windowId: windowId, windowLocalPoint: point,
                 type: type, button: btn, clickCount: step.clickState,
                 pressure: step.pressure, eventNumber: Int(nextEventNumber()))
             if !delivered { return false }
             if step.phase == .down { Thread.sleep(forTimeInterval: 0.005) }
+            // Settle gap after the primer's up so the real click reads as a
+            // trusted continuation of the just-registered gesture.
+            if step.isPrimer, step.phase == .up { Thread.sleep(forTimeInterval: 0.006) }
         }
         return true
     }
@@ -219,7 +229,8 @@ public final class KitInputProvider: InputProvider {
     public func clickAt(
         pid: Int, windowId: Int, x: Double, y: Double,
         button: String, count: Int,
-        screenshotSize: (width: Int, height: Int)?, source: EventSource?
+        screenshotSize: (width: Int, height: Int)?, source: EventSource?,
+        prime: Bool = false
     ) throws {
         guard let mb = MouseButton(name: button) else {
             throw AutomationError.input("Unknown mouse button: \(button)")
@@ -230,14 +241,19 @@ public final class KitInputProvider: InputProvider {
         // Fidelity-first: try the window-stamped SkyLight path (C2); it routes to
         // the window server's hit-test, which Chromium/Electron honor. Falls
         // through to the CGEvent base path on any failure (no foregrounding).
+        // The US-057 primer rides ONLY this trusted path (`prime`).
         let local = InputCoords.windowLocalPoint(
             windowBounds: bounds, x: x, y: y, screenshotSize: screenshotSize)
         if trySkyLightClick(
             pid: pid, windowId: windowId,
             windowLocalPoint: CGPoint(x: local.x, y: local.y),
-            button: mb, count: count) {
+            button: mb, count: count, includePrimer: prime) {
             return
         }
+        // CGEvent fallback: the primer is intentionally NOT replayed here — the
+        // user-activation gate only honors gestures from the trusted SkyLight
+        // channel, so a CGEvent-path decoy would be pointless (and web content
+        // won't accept the real click on this path anyway, per cua-driver).
         let screen = InputCoords.windowToScreenCoords(
             windowBounds: bounds, x: x, y: y, screenshotSize: screenshotSize)
         try postClick(pid: pid, point: CGPoint(x: screen.x, y: screen.y),

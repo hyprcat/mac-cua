@@ -56,7 +56,7 @@ targets += [
     // in the implementations per provider.
     .target(
         name: "MacCUAKit",
-        dependencies: ["MacCUACore", "CSkyLightShim"]
+        dependencies: ["MacCUACore", "MacCUAServer", "CSkyLightShim"]
     ),
     .testTarget(
         name: "MacCUAKitTests",

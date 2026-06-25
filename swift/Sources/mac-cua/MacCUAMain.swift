@@ -58,10 +58,24 @@ private func toSDKContent(_ block: MCPContent) -> Tool.Content {
 private actor ToolRouter {
     private let mcp: MCPServer
     private let permissions: PermissionsGate
+    // Strong owner of the decorative ghost-cursor rendering layer. The
+    // `GhostCursorController` inside `SessionManager` holds the overlay WEAKLY, so
+    // the live server must keep it alive for the virtual cursor to render.
+    private let ghostOverlay: KitGhostCursorOverlay
 
     init() {
         let providers = makeKitProviders()
         let sessionManager = SessionManager(providers: providers)
+
+        // Wire the AppKit rendering into the session's ghost controller. Without
+        // this the controller's `overlay` is nil and every show/move/pulse is a
+        // silent no-op — i.e. the virtual cursor never appears. This is a single
+        // desktop-spanning cursor that travels across apps (no per-window tracker:
+        // it isn't window-clipped or window-followed), persisting for the session.
+        let overlay = KitGhostCursorOverlay()
+        sessionManager.ghostController.overlay = overlay
+        self.ghostOverlay = overlay
+
         self.mcp = MCPServer(sessionManager: sessionManager, providers: providers)
         self.permissions = PermissionsGate(apps: providers.apps, capture: providers.capture)
     }

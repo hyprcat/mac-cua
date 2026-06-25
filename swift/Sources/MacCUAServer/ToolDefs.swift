@@ -69,6 +69,16 @@ public var toolDefs: [ToolDef] {[
             "properties": [
                 "app": ["type": "string", "description": "App name or bundle identifier"],
                 "window_id": ["type": "integer", "description": "Target window ID from a previous snapshot or list_apps"],
+                "mode": [
+                    "type": "string",
+                    "enum": ["som", "ax", "vision"],
+                    "description": (
+                        "Capture mode (default som). som = accessibility tree + screenshot "
+                        + "(element_index addressing). ax = tree only, no screenshot — needs "
+                        + "no Screen Recording permission. vision = screenshot only, tree "
+                        + "omitted (no element_index addressing)."
+                    ),
+                ],
             ],
             "additionalProperties": false,
         ]

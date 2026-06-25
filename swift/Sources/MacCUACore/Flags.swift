@@ -58,6 +58,14 @@ public struct FeatureFlags: Equatable, Sendable {
     /// Vision OCR fallback for tree-less surfaces (A2, US-046). Off by default —
     /// OCR is opt-in and strictly gated to near-empty/AX-unavailable surfaces.
     public var ocrFallback: Bool
+    /// Chromium user-activation primer click (US-057). On by default — a
+    /// kill-switch. Scoped at the call site to web-content pixel clicks only;
+    /// off-screen + pid-scoped, so it never foregrounds (Inv 18).
+    public var clickPrimer: Bool
+    /// Remote-aware AX observer registration for occluded Electron (US-059). On by
+    /// default — a kill-switch. Optional/dlsym-gated (Inv 17); absence degrades to
+    /// the public `AXObserverAddNotification`. Correctness is unaffected either way.
+    public var electronRemoteObserver: Bool
 
     public init(
         alwaysSimulateClick: Bool = false,
@@ -80,7 +88,9 @@ public struct FeatureFlags: Equatable, Sendable {
         advancedPruning: Bool = true,
         allowForbiddenTargets: Bool = false,
         confirmedDelivery: Bool = true,
-        ocrFallback: Bool = false
+        ocrFallback: Bool = false,
+        clickPrimer: Bool = true,
+        electronRemoteObserver: Bool = true
     ) {
         self.alwaysSimulateClick = alwaysSimulateClick
         self.screenshotClassifier = screenshotClassifier
@@ -103,6 +113,8 @@ public struct FeatureFlags: Equatable, Sendable {
         self.allowForbiddenTargets = allowForbiddenTargets
         self.confirmedDelivery = confirmedDelivery
         self.ocrFallback = ocrFallback
+        self.clickPrimer = clickPrimer
+        self.electronRemoteObserver = electronRemoteObserver
     }
 
     /// All flag snake_case (config + env) names, in `dataclasses.fields(cls)` order.
@@ -129,6 +141,8 @@ public struct FeatureFlags: Equatable, Sendable {
         "allow_forbidden_targets",
         "confirmed_delivery",
         "ocr_fallback",
+        "click_primer",
+        "electron_remote_observer",
     ]
 
     /// Read a flag by its snake_case name. Returns nil for unknown names.
@@ -155,6 +169,8 @@ public struct FeatureFlags: Equatable, Sendable {
         case "allow_forbidden_targets": return allowForbiddenTargets
         case "confirmed_delivery": return confirmedDelivery
         case "ocr_fallback": return ocrFallback
+        case "click_primer": return clickPrimer
+        case "electron_remote_observer": return electronRemoteObserver
         default: return nil
         }
     }
@@ -183,6 +199,8 @@ public struct FeatureFlags: Equatable, Sendable {
         case "allow_forbidden_targets": allowForbiddenTargets = value
         case "confirmed_delivery": confirmedDelivery = value
         case "ocr_fallback": ocrFallback = value
+        case "click_primer": clickPrimer = value
+        case "electron_remote_observer": electronRemoteObserver = value
         default: break
         }
     }
@@ -232,16 +250,13 @@ public struct FeatureFlags: Equatable, Sendable {
 ///
 /// Env var override: `MAC_CUA_WORKAROUND_<UPPER_SNAKE_NAME>`.
 public struct WorkaroundFlags: Equatable, Sendable {
-    public var loopStepLimit: Int
     public var meetingNotesInCalendar: Bool
     public var shortenLinksForDemo: Bool
 
     public init(
-        loopStepLimit: Int = 20,
         meetingNotesInCalendar: Bool = false,
         shortenLinksForDemo: Bool = false
     ) {
-        self.loopStepLimit = loopStepLimit
         self.meetingNotesInCalendar = meetingNotesInCalendar
         self.shortenLinksForDemo = shortenLinksForDemo
     }
@@ -253,9 +268,6 @@ public struct WorkaroundFlags: Equatable, Sendable {
         var instance = WorkaroundFlags()
 
         if let config, let workaroundData = config["workarounds"] as? [String: Any] {
-            if let raw = workaroundData["loop_step_limit"], let i = coerceInt(raw) {
-                instance.loopStepLimit = i
-            }
             if let raw = workaroundData["meeting_notes_in_calendar"] {
                 instance.meetingNotesInCalendar = truthy(raw)
             }
@@ -264,10 +276,7 @@ public struct WorkaroundFlags: Equatable, Sendable {
             }
         }
 
-        // Env overrides: int fields parse as Int (ignore invalid), bools as truthy.
-        if let v = env("MAC_CUA_WORKAROUND_LOOP_STEP_LIMIT"), let i = Int(v) {
-            instance.loopStepLimit = i
-        }
+        // Env overrides: bools parse as truthy.
         if let v = env("MAC_CUA_WORKAROUND_MEETING_NOTES_IN_CALENDAR") {
             instance.meetingNotesInCalendar = parseFlagBool(v)
         }

@@ -208,22 +208,6 @@ final class PipelineTests: XCTestCase {
         XCTAssertTrue(response.error?.contains("com.apple.keychainaccess") ?? false)
     }
 
-    /// Ports test_step_limit_raises_step_limit_error: hitting the loop step limit
-    /// produces a "Step limit" error.
-    func testStepLimitSurfacesError() {
-        let mgr = SessionManager(
-            providers: makeFakeProviders(apps: apps(), capture: capture()),
-            flags: flags(),
-            workarounds: WorkaroundFlags(loopStepLimit: 1))
-
-        // First action consumes the only allowed step.
-        _ = mgr.execute("click", ["window_id": windowId, "x": 1.0, "y": 2.0])
-        // Second action trips the limit.
-        let response = mgr.execute("click", ["window_id": windowId, "x": 1.0, "y": 2.0])
-        XCTAssertNotNil(response.error)
-        XCTAssertTrue(response.error?.contains("Step limit") ?? false)
-    }
-
     /// Ports test_stale_reference_refreshes_tree: a StaleReferenceError from
     /// dispatch is caught and turned into a refreshed snapshot with the error
     /// attached ("Tree refreshed").

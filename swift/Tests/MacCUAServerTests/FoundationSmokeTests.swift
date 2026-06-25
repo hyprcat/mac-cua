@@ -35,10 +35,9 @@ final class FoundationSmokeTests: XCTestCase {
         approvals.approveForSession("com.x")
         XCTAssertTrue(approvals.isApproved("com.x"))
 
-        let life = SessionLifecycle(stepLimit: 2)
-        life.incrementStep()
-        XCTAssertFalse(life.checkStepLimit())
-        life.incrementStep()
-        XCTAssertTrue(life.checkStepLimit())
+        let life = SessionLifecycle()
+        life.startTurn("t1")
+        life.trackAppUsed("com.x")
+        XCTAssertEqual(life.usedApps, ["com.x"])
     }
 }

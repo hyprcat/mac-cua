@@ -24,8 +24,9 @@
 #include <stdint.h>
 
 #if defined(__APPLE__)
-#include <CoreGraphics/CoreGraphics.h>   // CGEventRef, CGPoint
-#include <CoreServices/CoreServices.h>   // ProcessSerialNumber
+#include <CoreGraphics/CoreGraphics.h>             // CGEventRef, CGPoint
+#include <CoreServices/CoreServices.h>             // ProcessSerialNumber
+#include <ApplicationServices/ApplicationServices.h> // AXError, AXObserverRef, AXUIElementRef, CFStringRef
 
 // --- Stable / lookup symbols ------------------------------------------------
 typedef uint32_t (*CSky_CGSMainConnectionID)(void);
@@ -40,6 +41,21 @@ typedef void (*CSky_SLEventSetIntegerValueField)(CGEventRef event, uint32_t fiel
 typedef void (*CSky_SLEventSetAuthenticationMessage)(CGEventRef event, const void *message);       // message = id (CFTypeRef)
 typedef void (*CSky_CGEventSetWindowLocation)(CGEventRef event, CGPoint location);                 // window-local coords (SkyLight export)
 typedef void (*CSky_CGEventPostToPSN)(ProcessSerialNumber *psn, CGEventRef event);
+
+// --- Remote-aware AX observer registration (US-059) -------------------------
+// Private HIServices SPI. Marks an AX observer "remote-aware" so Chromium /
+// Electron (Blink) apps keep firing AX notifications even while their window is
+// OCCLUDED — the public AXObserverAddNotification does not, so Blink
+// short-circuits notifications when occluded.
+//
+// Resolved OPTIONALLY at runtime via the existing
+// `csky_resolve_symbol("_AXObserverAddNotificationAndCheckRemote")`; it is NEVER
+// a hard link dependency (Invariant 17). When the symbol is absent the Swift
+// caller falls back to the public AXObserverAddNotification — this is purely an
+// occluded-Electron notification-liveness + settle-timing optimization, NOT a
+// correctness fix (the AX tree re-walk remains the source of truth). No new
+// resolver is added; the same `csky_resolve_symbol` lookup is reused.
+typedef AXError (*CSky_AXObserverAddNotificationAndCheckRemote)(AXObserverRef observer, AXUIElementRef element, CFStringRef notification, void *refcon);
 
 // Resolve a private symbol by name via dlsym. Searches the global symbol table
 // first (CoreGraphics public exports + already-loaded frameworks), then the

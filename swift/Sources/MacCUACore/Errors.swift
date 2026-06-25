@@ -36,6 +36,7 @@ public struct AutomationError: Error, Equatable, CustomStringConvertible {
         case permissionsPending = "PermissionsPendingError"
         case appBlocked = "AppBlockedError"
         case stepLimit = "StepLimitError"
+        case unsupportedSurface = "UnsupportedSurfaceError"
     }
 
     public var kind: Kind
@@ -108,6 +109,9 @@ public struct AutomationError: Error, Equatable, CustomStringConvertible {
     public static func stepLimit(_ message: String, code: Int? = nil) -> AutomationError {
         AutomationError(kind: .stepLimit, message, code: code)
     }
+    public static func unsupportedSurface(_ message: String, code: Int? = nil) -> AutomationError {
+        AutomationError(kind: .unsupportedSurface, message, code: code)
+    }
 }
 
 // MARK: - Reason-code constants (mirror Python class attributes)
@@ -137,6 +141,40 @@ public enum SafetyError {
     public static let appBlocked = "app_blocked_for_safety"
     public static let urlBlocked = "url_blocked_for_safety"
     public static let privateIPBlocked = "private_ip_address_blocked"
+}
+
+/// Unsupported-surface reason codes (`UnsupportedSurfaceError` class attributes).
+///
+/// `unsupportedCanvasSurface` flags a canvas / foreground-only surface (Blender
+/// GHOST, Unity, common game engines) that only accepts synthetic input after a
+/// window activation — which mac-cua never performs (Prime Invariant, Inv 18).
+/// See `docs/KNOWN_LIMITATIONS.md` and `CanvasSurfaceHeuristic`.
+public enum UnsupportedSurfaceError {
+    public static let unsupportedCanvasSurface = "unsupported_canvas_surface"
+
+    /// Canonical user-facing message for the `unsupported_canvas_surface` reason.
+    /// Explains *why* the click cannot land: the surface requires window
+    /// activation, which mac-cua does not perform by design (Inv 18). Kept here so
+    /// every call site (spine + tests) speaks with one voice. `detail` (e.g. the
+    /// bundle id) is appended when known.
+    public static func canvasSurfaceMessage(detail: String? = nil) -> String {
+        var message =
+            "This surface requires window activation to accept input, which mac-cua "
+            + "does not perform by design (Prime Invariant): the driver never "
+            + "foregrounds, activates, or raises a window. Canvas / game surfaces "
+            + "(e.g. Blender GHOST, Unity) are therefore unsupported."
+        if let detail, !detail.isEmpty {
+            message += " (\(detail))"
+        }
+        return message
+    }
+
+    /// Build a fully-formed `UnsupportedSurfaceError` carrying the canonical
+    /// canvas-surface message. The spine returns this instead of silently dropping
+    /// a click that cannot land.
+    public static func canvasSurface(detail: String? = nil) -> AutomationError {
+        AutomationError(kind: .unsupportedSurface, canvasSurfaceMessage(detail: detail))
+    }
 }
 
 // MARK: - AX error code mapping

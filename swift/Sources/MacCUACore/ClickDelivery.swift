@@ -28,11 +28,20 @@ public struct ClickEventStep: Equatable, Sendable {
     public let clickState: Int
     /// Pressure rides on the event: full on down, zero on up.
     public let pressure: Double
+    /// True for the off-screen Chromium user-activation *primer* pair (US-057):
+    /// a throwaway decoy down/up posted before the real click to tick Chromium's
+    /// user-activation gate. Kit reads this to post the step at the off-screen
+    /// decoy coordinate (pid-scoped, no raise — Inv 18) instead of the real
+    /// target point. False for every real click step.
+    public let isPrimer: Bool
 
-    public init(phase: Phase, clickState: Int, pressure: Double) {
+    /// `isPrimer` defaults to `false` so existing call sites and their event
+    /// shape stay byte-identical (a real click is never a primer).
+    public init(phase: Phase, clickState: Int, pressure: Double, isPrimer: Bool = false) {
         self.phase = phase
         self.clickState = clickState
         self.pressure = pressure
+        self.isPrimer = isPrimer
     }
 }
 
@@ -53,5 +62,32 @@ public enum ClickDelivery {
             steps.append(ClickEventStep(phase: .up, clickState: clickNum, pressure: upPressure))
         }
         return steps
+    }
+
+    /// The off-screen Chromium user-activation primer pair (US-057): a single
+    /// throwaway down/up that ticks Chromium's user-activation gate so the real
+    /// click that follows is trusted. It is a *discard* gesture — it carries
+    /// zero pressure on BOTH events (it is never meant to register as a real
+    /// press) and `clickState` 1 (a lone single click). Kit posts it at an
+    /// off-screen, pid-scoped coordinate, raising nothing (Inv 18).
+    public static func primerPair() -> [ClickEventStep] {
+        [
+            ClickEventStep(phase: .down, clickState: 1, pressure: upPressure, isPrimer: true),
+            ClickEventStep(phase: .up, clickState: 1, pressure: upPressure, isPrimer: true),
+        ]
+    }
+
+    /// The ordered steps for an N-count click, optionally prefixed by the
+    /// Chromium user-activation primer pair (US-057).
+    ///
+    /// When `includePrimer` is `true`, exactly ONE primer down/up pair
+    /// (`isPrimer: true`, pressure 0.0 on both, `clickState` 1) is PREPENDED
+    /// before the normal real-click steps from `sequence(count:)`. When it is
+    /// `false`, the result is exactly `sequence(count:)` — the real steps are
+    /// never altered, only preceded.
+    public static func sequence(count: Int, includePrimer: Bool) -> [ClickEventStep] {
+        let real = sequence(count: count)
+        guard includePrimer else { return real }
+        return primerPair() + real
     }
 }

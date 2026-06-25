@@ -18,7 +18,8 @@ final class EnhancedUISpineTests: XCTestCase {
 
     func testPrimesEnhancedUIForElectron() {
         let ax = FakeAccessibility()
-        ax.tree = [Node(index: 0, role: "button", depth: 0)]  // non-empty -> poll stops fast
+        // Web content present -> poll stops as soon as the web area appears.
+        ax.tree = [Node(index: 0, role: "web area", depth: 0, isWebArea: true, axRole: "AXWebArea")]
         let mgr = SessionManager(providers: makeFakeProviders(accessibility: ax))
         let session = makeSession(appType: .electron)
 
@@ -26,12 +27,12 @@ final class EnhancedUISpineTests: XCTestCase {
 
         XCTAssertEqual(ax.enhancedUIPids, [321])
         XCTAssertTrue(session.enhancedUIPrimed)
-        XCTAssertGreaterThanOrEqual(ax.walkCount, 1)
+        XCTAssertEqual(ax.walkCount, 1)
     }
 
     func testPrimesEnhancedUIForBrowser() {
         let ax = FakeAccessibility()
-        ax.tree = [Node(index: 0, role: "group", depth: 0)]
+        ax.tree = [Node(index: 0, role: "web area", depth: 0, isWebArea: true, axRole: "AXWebArea")]
         let mgr = SessionManager(providers: makeFakeProviders(accessibility: ax))
         let session = makeSession(appType: .browser)
 
@@ -51,7 +52,7 @@ final class EnhancedUISpineTests: XCTestCase {
 
     func testPrimesAtMostOncePerSession() {
         let ax = FakeAccessibility()
-        ax.tree = [Node(index: 0, role: "button", depth: 0)]
+        ax.tree = [Node(index: 0, role: "web area", depth: 0, isWebArea: true, axRole: "AXWebArea")]
         let mgr = SessionManager(providers: makeFakeProviders(accessibility: ax))
         let session = makeSession(appType: .electron)
 
@@ -60,16 +61,17 @@ final class EnhancedUISpineTests: XCTestCase {
         XCTAssertEqual(ax.enhancedUIPids, [321])  // exactly once
     }
 
-    func testRewalkPollsWhenTreeStaysEmpty() {
-        // Empty tree -> the re-walk loop exhausts its attempts (proves the first
-        // walk being empty does not abort). Use a tiny interval to keep it fast.
+    func testRewalkPollsUntilAttemptsExhaustedWithoutWebContent() {
+        // A tree that never shows an AXWebArea -> the re-walk loop exhausts its
+        // attempts (proves chrome-only / empty trees do not abort the poll early;
+        // it now stops on "web content appeared", not "tree non-empty").
         let ax = FakeAccessibility()
         ax.tree = []
         let mgr = SessionManager(providers: makeFakeProviders(accessibility: ax))
         let session = makeSession(appType: .electron)
 
         mgr.primeEnhancedUI(session)
-        // Default policy = 5 attempts; an always-empty tree walks all 5.
-        XCTAssertEqual(ax.walkCount, EnhancedUIRewalkPolicy().maxAttempts)
+        // Priming policy: no web content ever -> walks all priming attempts.
+        XCTAssertEqual(ax.walkCount, EnhancedUIRewalkPolicy.priming.maxAttempts)
     }
 }

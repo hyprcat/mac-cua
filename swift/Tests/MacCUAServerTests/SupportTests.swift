@@ -57,41 +57,27 @@ final class SupportTests: XCTestCase {
 
     // MARK: SessionLifecycle
 
-    func testStepLimitAndAppTracking() {
-        let lc = SessionLifecycle(stepLimit: 2)
+    func testAppTracking() {
+        let lc = SessionLifecycle()
         lc.trackAppUsed("com.a")
         lc.trackAppUsed("com.a") // dedup
         lc.trackAppUsed("com.b")
         XCTAssertEqual(lc.usedApps, ["com.a", "com.b"])
-
-        XCTAssertFalse(lc.checkStepLimit())
-        lc.incrementStep()
-        XCTAssertFalse(lc.checkStepLimit())
-        lc.incrementStep()
-        XCTAssertTrue(lc.checkStepLimit())
-    }
-
-    func testStepLimitZeroDisables() {
-        let lc = SessionLifecycle(stepLimit: 0)
-        for _ in 0..<100 { lc.incrementStep() }
-        XCTAssertFalse(lc.checkStepLimit())
     }
 
     func testTurnMetadataGrouping() {
-        let lc = SessionLifecycle(stepLimit: 20)
+        let lc = SessionLifecycle()
         XCTAssertNil(lc.currentTurn)
         lc.startTurn("turn-1", startedAt: 123.0)
-        lc.incrementStep()
         lc.trackAppUsed("com.a")
         XCTAssertEqual(lc.currentTurn?.turnId, "turn-1")
         XCTAssertEqual(lc.currentTurn?.startedAt, 123.0)
-        XCTAssertEqual(lc.currentTurn?.stepCount, 1)
         XCTAssertEqual(lc.currentTurn?.appsUsed, ["com.a"])
 
         lc.endTurn()
         XCTAssertNil(lc.currentTurn)
-        // Session-level counters persist across the turn boundary.
-        XCTAssertEqual(lc.stepCount, 1)
+        // Session-level app tracking persists across the turn boundary.
+        XCTAssertEqual(lc.usedApps, ["com.a"])
     }
 
     // MARK: BufferingAnalytics

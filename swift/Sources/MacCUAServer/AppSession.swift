@@ -53,6 +53,10 @@ public final class AppSession {
     public var guidanceDelivered: Bool = false
     /// Whether Chromium/Electron enhanced UI was primed for this session (A1).
     public var enhancedUIPrimed: Bool = false
+    /// Set when a handler already forced a fresh AX re-walk for the current
+    /// action (set_value/click verdicts), so the spine's post-action re-walk skips
+    /// a redundant second walk. Reset at the start of every execute().
+    public var didForceRewalkThisAction: Bool = false
 
     // Input strategy + delivery.
     public var inputStrategy: InputStrategy?

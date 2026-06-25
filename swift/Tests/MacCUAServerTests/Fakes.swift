@@ -179,6 +179,9 @@ final class FakeAccessibility: AccessibilityProvider {
 
 final class FakeInput: InputProvider {
     private(set) var clicks: [(x: Double, y: Double, button: String, count: Int)] = []
+    /// Per-`clickAt` primer flag (US-057), parallel to `clicks`. Lets the spine
+    /// test assert a browser pixel click is primed and a native one is not.
+    private(set) var clickPrimes: [Bool] = []
     private(set) var drags: [(fromX: Double, fromY: Double, toX: Double, toY: Double)] = []
     private(set) var keys: [String] = []
     private(set) var typed: [String] = []
@@ -205,8 +208,9 @@ final class FakeInput: InputProvider {
         return FakeEventSource()
     }
     func clickAt(pid: Int, windowId: Int, x: Double, y: Double, button: String, count: Int,
-                 screenshotSize: (width: Int, height: Int)?, source: EventSource?) throws {
+                 screenshotSize: (width: Int, height: Int)?, source: EventSource?, prime: Bool = false) throws {
         clicks.append((x, y, button, count))
+        clickPrimes.append(prime)
         events.append(.init(kind: "click", pid: pid, windowId: windowId, sourceId: sid(source)))
     }
     func clickAtScreenPoint(pid: Int, x: Double, y: Double, button: String, count: Int,

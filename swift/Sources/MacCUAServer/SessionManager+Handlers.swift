@@ -45,17 +45,55 @@ extension SessionManager {
 
         if let idx = elementIndex(params) {
             let node = try resolveIndex(session, idx)
+            // Glide the decorative ghost to the element first, so it moves to the
+            // target regardless of which delivery path (AX-press / hit-test /
+            // background CGEvent) ultimately handles the click. The pointer shape
+            // matches the element (hand over buttons/links, I-beam over text).
+            if let p = clickPointForNode(session, node) {
+                noteCursor(session, p, kind: cursorKind(for: node))
+            }
+            // Pre-click AX signature, so a delivered-but-unverified click can be
+            // confirmed by re-walking and detecting a real UI change (Option A).
+            let beforeSig = treeSignature(session.refetchableTree?.nodes ?? session.treeNodes)
             let preferPointer = shouldPreferPointerInput(session, node)
             if !preferPointer {
                 if let r = tryAXClickNode(session, node, idx, button: button, count: count) { return r }
                 if let r = tryAXHitTestClick(session, node, idx, button: button, count: count) { return r }
             }
+            var bgDelivered = false
             if backgroundClickNode(session, node, button: button, count: count) {
                 return "Clicked element \(idx) (CGEventPostToPid)"
+            } else {
+                // Captured immediately: later AX fallbacks below may overwrite the
+                // shared verdict. `.noEffect` means the CGEvent was delivered but
+                // its effect couldn't be observed by the verifier.
+                bgDelivered = session.lastActionVerification == .noEffect
             }
             if preferPointer {
                 if let r = tryAXHitTestClick(session, node, idx, button: button, count: count) { return r }
                 if let r = tryAXClickNode(session, node, idx, button: button, count: count) { return r }
+            }
+            // Option A + AX re-walk: a click can be delivered while its verifier
+            // can't observe the effect (AX-press on an action button like "New
+            // Tab", or a background CGEvent). Cheap signal first — if the action
+            // already invalidated the tree (the settle monitor saw AX changes),
+            // the click had an effect, no extra walk needed. Only when the monitor
+            // is quiet do we force ONE re-walk and compare signatures.
+            let effected: Bool
+            if session.refetchableTree?.isInvalidated == true {
+                effected = true
+            } else {
+                let afterSig = treeSignature(session.refetchableTree?.forceRewalk() ?? session.treeNodes)
+                session.didForceRewalkThisAction = true
+                effected = afterSig != beforeSig
+            }
+            if effected {
+                return "Clicked element \(idx) (effect confirmed via AX re-walk)"
+            }
+            // Delivered (transport confirmed) but no observable effect — report
+            // honestly rather than as a hard failure.
+            if bgDelivered {
+                return "Clicked element \(idx) (delivered, effect unverified)"
             }
             throw AutomationError.automation(
                 "Click failed for element \(idx). "
@@ -68,11 +106,28 @@ extension SessionManager {
                 session, sx, sy, displayX: x, displayY: y, button: button, count: count
             ) { return r }
 
+            // US-060: known canvas/foreground-only surfaces (Blender/Unity/games)
+            // only accept events after a foreground activation — forbidden by the
+            // Prime Invariant (Inv 18). AX had its chance above; refuse the doomed
+            // pixel click loudly instead of dropping it silently. Conservative —
+            // fires only on known-canvas bundle ids/engine prefixes.
+            if CanvasSurfaceHeuristic.isLikelyCanvasSurface(
+                SurfaceDescriptor(bundleId: t.bundleId, axRoleCount: session.treeNodes.count)) {
+                throw UnsupportedSurfaceError.canvasSurface(detail: t.bundleId)
+            }
+
+            // US-057: Chromium user-activation primer, scoped to web-content pixel
+            // clicks (browser/electron). Reaching here means the AX hit-test above
+            // found no actionable target — a true coordinate/pixel click.
+            let primeClick = ClickPrimerPolicy.shouldPrime(
+                surface: session.appType, clickKind: .pixel, flagEnabled: flags.clickPrimer)
+
             do {
                 try providers.input.clickAt(
                     pid: t.windowPid, windowId: t.windowId, x: x, y: y,
                     button: button, count: count,
-                    screenshotSize: session.screenshotSize, source: session.eventSource
+                    screenshotSize: session.screenshotSize, source: session.eventSource,
+                    prime: primeClick
                 )
                 return "Clicked at (\(fmt(x)), \(fmt(y))) (CGEventPostToPid)"
             } catch let exc as AutomationError where exc.isInputError {
@@ -85,7 +140,8 @@ extension SessionManager {
                     try providers.input.clickAt(
                         pid: t2.windowPid, windowId: t2.windowId, x: x, y: y,
                         button: button, count: count,
-                        screenshotSize: session.screenshotSize, source: session.eventSource
+                        screenshotSize: session.screenshotSize, source: session.eventSource,
+                        prime: primeClick
                     )
                     let afterCoord = captureElementSnapshot(session, nil)
                     computeDeliveryVerdict(
@@ -103,10 +159,15 @@ extension SessionManager {
                 session, sx, sy, displayX: x, displayY: y, button: button, count: count
             ) { return r }
 
-            throw AutomationError.automation(
-                "Click failed at (\(fmt(x)), \(fmt(y))). "
+            var failMsg = "Click failed at (\(fmt(x)), \(fmt(y))). "
                 + "Use get_app_state and retry with a fresh screenshot or click by element_index."
-            )
+            // US-060: a tree-less surface that drops a pixel click may be an
+            // unsupported canvas/foreground-only surface — hint, don't assert.
+            if session.treeNodes.isEmpty {
+                failMsg += " " + CanvasSurfaceHeuristic.noEffectHint(
+                    SurfaceDescriptor(bundleId: t.bundleId, axRoleCount: 0))
+            }
+            throw AutomationError.automation(failMsg)
         } else {
             throw AutomationError.automation(
                 "click requires either element_index or both x and y coordinates"
@@ -129,6 +190,10 @@ extension SessionManager {
         if let elIdx {
             let n = try resolveIndex(session, elIdx)
             node = n
+            // Glide the ghost (I-beam over text) to the field being typed into.
+            if let p = clickPointForNode(session, n) {
+                noteCursor(session, p, kind: cursorKind(for: n))
+            }
             if n.axRole == "AXTextField" || n.axRole == "AXTextArea", let ref = n.axRef {
                 let mark = session.axOutcomeMonitor?.mark()
                 if let eto = providers.accessibility.makeEditableText(element: ref, pid: n.elementPid) {
@@ -179,6 +244,15 @@ extension SessionManager {
         let node = try resolveIndex(session, idx)
         let value = stringParam(params["value"], default: "")
         let insertMode = boolParam(params["insert"], default: false)
+
+        // Read-back BEFORE any set attempt. The exact-equality verifiers below
+        // can miss legitimate successes when the field augments/normalises the
+        // value (e.g. Safari autocomplete completion, multi-line or em-dash
+        // normalisation). Capturing the prior text lets the final verdict
+        // recognise a "delivered + changed" outcome (Option A).
+        let beforeText: String? = node.axRef.flatMap {
+            providers.accessibility.makeEditableText(element: $0, pid: node.elementPid)?.text
+        }
 
         // --- EditableText for text elements ---
         if node.axRole == "AXTextField" || node.axRole == "AXTextArea", let ref = node.axRef {
@@ -260,11 +334,56 @@ extension SessionManager {
             }
         }
 
-        throw AutomationError.automation(
-            "Cannot set value of element \(idx). "
-            + "Element may not support direct value setting. "
-            + "Try type_text with element_index instead."
-        )
+        // Option A + AX re-walk: no exact-equality verifier confirmed, but the
+        // value may still have been applied (the live read-back lags a programmatic
+        // AXValue set — see RefetchableTree.forceRewalk). Force a fresh re-walk and
+        // read the element's current value from it, then accept as success if the
+        // field now equals the value OR changed from its pre-set content; otherwise
+        // report UNVERIFIED (not a hard failure).
+        let afterText = freshNodeText(session, node)
+        if let afterText, afterText == value || afterText != (beforeText ?? "") {
+            return "Set value of element \(idx) to \(repr(value)) "
+                + "(verified via AX re-walk, read-back=\(repr(afterText)))"
+        }
+        return "set_value delivered to element \(idx) but the change could not be "
+            + "verified after an AX re-walk (read-back unchanged). The element may "
+            + "not expose its value via AX (e.g. some browser fields); the set may "
+            + "still have applied."
+    }
+
+    /// Stable content signature of a node list, used to detect whether a mutating
+    /// action actually changed the UI. Deliberately ignores volatile fields
+    /// (focus/selection states, geometry, cursor) so a mere focus change does not
+    /// read as an effect — only structural/value/label changes count.
+    private func treeSignature(_ nodes: [Node]) -> Int {
+        var hasher = Hasher()
+        hasher.combine(nodes.count)
+        for n in nodes {
+            hasher.combine(n.role)
+            hasher.combine(n.value ?? "")
+            hasher.combine(n.label ?? "")
+            hasher.combine(n.description ?? "")
+        }
+        return hasher.finalize()
+    }
+
+    /// Force a fresh AX re-walk and return the current text of `node` (matched by
+    /// its AX handle in the rewalked tree, falling back to a live read). Used by
+    /// set_value verification, where the cached/live read-back lags a programmatic
+    /// AXValue set.
+    private func freshNodeText(_ session: AppSession, _ node: Node) -> String? {
+        let fresh = session.refetchableTree?.forceRewalk()
+        session.didForceRewalkThisAction = true
+        if let fresh, let ref = node.axRef {
+            if let match = fresh.first(where: {
+                providers.accessibility.refsEqual($0.axRef, ref)
+            }) {
+                return match.value ?? match.selectedText
+            }
+        }
+        return node.axRef.flatMap {
+            providers.accessibility.makeEditableText(element: $0, pid: node.elementPid)?.text
+        }
     }
 
     // MARK: - press_key (session.py:3096)
@@ -529,7 +648,7 @@ extension SessionManager {
         var targetNode = prepareNodeForPointerClick(session, node)
         targetNode = resolveClickTargetNode(session, targetNode)
         guard let point = clickPointForNode(session, targetNode) else { return false }
-        noteCursor(session, point)
+        noteCursor(session, point, kind: cursorKind(for: targetNode))
         do {
             let transportMark = session.cgeventOutcomeMonitor?.mark() ?? 0
             try providers.input.clickAtScreenPoint(
@@ -556,6 +675,11 @@ extension SessionManager {
                     ),
                     transientSource: transientSource
                 )
+                // Record the CGEvent verdict (overriding the inner AX verdict) so
+                // the caller can distinguish "delivered but effect unverified"
+                // (.noEffect — e.g. an action button the selection verifier can't
+                // observe) from "not delivered" (.timeout / throw). Option A.
+                session.lastActionVerification = v
                 return v == .confirmed || v == .transientOpened
             }
             return true
@@ -1314,8 +1438,28 @@ extension SessionManager {
     /// is the single chokepoint that drives the decorative ghost overlay via
     /// `BackgroundCursor.moveTo` (render deferred to Phase 6). Logical only — the
     /// OS cursor never moves (Prime Invariant / Invariant 2).
-    func noteCursor(_ session: AppSession, _ point: Point) {
-        session.cursor?.moveTo(point)
+    func noteCursor(_ session: AppSession, _ point: Point, kind: GhostCursorKind = .arrow) {
+        // Animated = the ghost glides (eased bezier "scoot") to where the agent is
+        // acting, instead of teleporting — human-like motion toward each element.
+        session.cursor?.moveTo(point, animated: true)
+        // Pick the matching pointer shape (arrow / I-beam / hand) for what's there.
+        ghostController.setKind(windowId: session.target.windowId, kind)
+    }
+
+    /// Map an element's accessibility role to the ghost pointer shape, mirroring
+    /// the system cursors: I-beam over editable text, a pointing hand over
+    /// buttons/links/clickable controls, otherwise the default arrow.
+    func cursorKind(for node: Node?) -> GhostCursorKind {
+        switch node?.axRole {
+        case "AXTextField", "AXTextArea", "AXSearchField", "AXComboBox":
+            return .ibeam
+        case "AXButton", "AXLink", "AXMenuButton", "AXPopUpButton", "AXMenuItem",
+             "AXCheckBox", "AXRadioButton", "AXDisclosureTriangle", "AXTabButton",
+             "AXIncrementor", "AXStepper", "AXSwitch":
+            return .hand
+        default:
+            return .arrow
+        }
     }
 
     /// Mirrors `_safe_perform_action`: perform an action on a node, swallowing errors.

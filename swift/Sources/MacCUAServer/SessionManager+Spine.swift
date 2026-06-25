@@ -86,7 +86,13 @@ extension SessionManager {
             ensureTrackersStarted()
             let resolved = try resolveSession(tool, params)
             session = resolved
+            resolved.didForceRewalkThisAction = false
             let isStateOnly = (tool == "get_app_state" || tool == "list_apps")
+            // US-058: capture mode is honored only for the user-facing get_app_state
+            // snapshot; every internal/post-action snapshot stays `.som`.
+            let captureMode: CaptureMode = (tool == "get_app_state")
+                ? (CaptureMode.parse(params["mode"] as? String) ?? .som)
+                : .som
 
             // Pre-action state for the feedback packet (F / US-039): the logical
             // cursor position and the pre-action tree (for the change summary).
@@ -102,12 +108,6 @@ extension SessionManager {
             try checkSafety(resolved.target.bundleId)
             checkApproval(resolved.target.bundleId)
             lifecycle.trackAppUsed(resolved.target.bundleId)
-            lifecycle.incrementStep()
-            if lifecycle.checkStepLimit() {
-                throw AutomationError.stepLimit(
-                    "Step limit reached (\(workarounds.loopStepLimit)). "
-                    + "End your current loop and summarize progress.")
-            }
 
             // Step 6c: start user-interaction monitoring (listen-only tap).
             if flags.userInterruptionDetection && !isStateOnly {
@@ -173,8 +173,20 @@ extension SessionManager {
                 providers.userInteractionMonitor.stopMonitoring()
             }
 
+            // Step 9b: ensure the post-action snapshot reflects reality even when
+            // the settle monitor saw no AX notification (programmatic AXValue set /
+            // some AX-press paths). Only force a re-walk when BOTH (a) the monitor
+            // is quiet — if it fired, `takeSnapshot` already re-walks via the
+            // !isInvalidated path, so forcing here would double-walk — and (b) a
+            // handler hasn't already re-walked for this action (set_value/click
+            // verdicts). This keeps it at a single AX walk per action.
+            if !isStateOnly, !resolved.didForceRewalkThisAction,
+               let tree = resolved.refetchableTree, !tree.isInvalidated {
+                tree.forceRewalk()
+            }
+
             // Step 10: capture snapshot (session already validated in resolve).
-            var response = takeSnapshot(resolved, skipRefresh: true)
+            var response = takeSnapshot(resolved, skipRefresh: true, mode: captureMode)
             response.result = result
             if !isStateOnly {
                 attachActionFeedback(
@@ -380,11 +392,14 @@ extension SessionManager {
             ghostController.startTracking(
                 windowId: session.target.windowId,
                 windowFrame: providers.capture.getWindowBounds(windowId: session.target.windowId))
-        } else {
-            // Window may have moved/rebound — keep the ghost's frame current.
-            ghostController.windowMoved(
-                windowId: session.target.windowId,
-                frame: providers.capture.getWindowBounds(windowId: session.target.windowId))
+        } else if let bounds = providers.capture.getWindowBounds(
+            windowId: session.target.windowId) {
+            // Window may have moved/rebound — keep the ghost's frame current. Only
+            // when we actually have fresh bounds: a momentarily-nil read must NOT
+            // tear the ghost down — once an app is driven, its cursor stays until
+            // the session is dropped. The window tracker re-hides/re-shows from its
+            // own polling if the window genuinely goes off-screen.
+            ghostController.windowMoved(windowId: session.target.windowId, frame: bounds)
         }
         primeEnhancedUI(session)
     }
@@ -404,11 +419,14 @@ extension SessionManager {
             axApp: session.target.axApp, pid: session.target.pid)) ?? false
         guard applied else { return }
 
-        // Re-walk poll: the first walk after enabling is expected empty.
-        let policy = EnhancedUIRewalkPolicy()
+        // Re-walk poll until the web a11y tree actually populates. A Chromium
+        // window exposes chrome nodes (window/container/buttons) immediately, so
+        // we must NOT stop on "tree non-empty" — we stop when an AXWebArea (real
+        // web content) appears, or the attempts are exhausted.
+        let policy = EnhancedUIRewalkPolicy.priming
         var attempt = 0
-        var nodeCount = 0
-        while policy.shouldContinue(attempt: attempt, nodeCount: nodeCount) {
+        var hasWebContent = false
+        while policy.shouldContinue(attempt: attempt, hasWebContent: hasWebContent) {
             if attempt > 0 && policy.pollIntervalMs > 0 {
                 Thread.sleep(forTimeInterval: Double(policy.pollIntervalMs) / 1000.0)
             }
@@ -417,7 +435,7 @@ extension SessionManager {
                 axElement: session.target.axWindow, targetPid: session.target.pid,
                 maxDepth: defaultMaxDepth, maxNodes: defaultMaxNodes,
                 includeActions: false, includeStates: false)) ?? []
-            nodeCount = nodes.count
+            hasWebContent = nodes.contains { $0.isWebArea || $0.role == "web area" }
         }
     }
 
@@ -826,7 +844,12 @@ extension SessionManager {
     /// graph/refetchable-tree wiring. Honors the transient-surface fast path and
     /// the stale-window retry. Indices are assigned only at the end of pruning
     /// (Invariant 22).
-    func takeSnapshot(_ session: AppSession, skipRefresh: Bool = false) -> ToolResponse {
+    func takeSnapshot(_ session: AppSession, skipRefresh: Bool = false, mode: CaptureMode = .som) -> ToolResponse {
+        // US-058: `som` (default) = tree + screenshot; `ax` = tree, no screenshot
+        // (no Screen Recording permission); `vision` = screenshot, tree omitted
+        // from the response. The internal AX walk always runs so session indices
+        // stay consistent regardless of mode.
+        let plan = mode.plan
         let transientSurface = activeTransientSurface(session)
 
         if !skipRefresh && transientSurface == nil {
@@ -862,8 +885,10 @@ extension SessionManager {
         }
 
         // Step 3: capture screenshot (best-effort; nil → degrade gracefully).
-        var img = captureScreenshot(session, t)
-        if img == nil {
+        // US-058 `ax` mode: the screen-capture API is NOT invoked at all (and the
+        // nil-retry is skipped), so the driver needs no Screen Recording permission.
+        var img = plan.captureScreenshot ? captureScreenshot(session, t) : nil
+        if plan.captureScreenshot, img == nil {
             refreshWindow(session)
             t = session.target
             if !session.windowAvailable {
@@ -927,8 +952,12 @@ extension SessionManager {
         }
 
         // Step 6 serialize (pruning already applied → enable_pruning=false).
-        let treeText = serialize(
-            displayNodes, focusedIndex: focused, enablePruning: false, codexStyle: flags.codexTreeStyle)
+        // US-058 `vision` mode: omit the tree from the RESPONSE (the walk above
+        // still ran). element_index addressing needs som/ax.
+        let treeText = plan.captureTree
+            ? serialize(
+                displayNodes, focusedIndex: focused, enablePruning: false, codexStyle: flags.codexTreeStyle)
+            : "(vision mode — accessibility tree omitted; use som or ax for element_index addressing)"
 
         // Step 7: header.
         let header = makeHeader(
@@ -1084,7 +1113,14 @@ extension SessionManager {
 
         if flags.codexTreeStyle {
             var working = nodes
-            if let axApp, let menuBar = providers.accessibility.getMenuBar(axApp: axApp) {
+            // Idempotency guard: a freshly-walked *window* tree never contains the
+            // app-level menu bar (it is appended here via getMenuBar). If the input
+            // already has one, it was a previously-pruned tree being reused from the
+            // RefetchableTree cache — re-appending would duplicate it and the copies
+            // accumulate +1 per snapshot, also corrupting the action change_summary.
+            let alreadyHasMenuBar = nodes.contains { $0.role == "menu bar" }
+            if !alreadyHasMenuBar,
+               let axApp, let menuBar = providers.accessibility.getMenuBar(axApp: axApp) {
                 if let menuNodes = try? providers.accessibility.walkTree(
                     axElement: menuBar, targetPid: targetPid, maxDepth: defaultMaxDepth,
                     maxNodes: defaultMaxNodes, includeActions: true, includeStates: true),

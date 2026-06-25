@@ -44,11 +44,27 @@ public struct EnhancedUIRewalkPolicy: Sendable {
         self.pollIntervalMs = max(0, pollIntervalMs)
     }
 
+    /// Policy used when priming a Chromium/Electron app on attach. The stop signal
+    /// is "web content appeared", NOT "tree non-empty" — an Electron *window*
+    /// always exposes a few chrome nodes (window, container, traffic-light buttons)
+    /// immediately, so a `nodeCount > 0` stop would exit before Chromium has built
+    /// its web a11y tree (which it does lazily over a few hundred ms→~1s after the
+    /// attributes are set). Bigger budget, content-aware stop.
+    public static let priming = EnhancedUIRewalkPolicy(maxAttempts: 12, pollIntervalMs: 100)
+
     /// Whether to perform another walk. `attempt` is the number of walks already
     /// performed (0 before the first). Stop once we have a non-empty tree or we
     /// have used up every attempt.
     public func shouldContinue(attempt: Int, nodeCount: Int) -> Bool {
         if nodeCount > 0 { return false }
+        return attempt < maxAttempts
+    }
+
+    /// Content-aware variant: keep walking until the tree shows real web content
+    /// (an AXWebArea), not just window chrome, or attempts are exhausted. Used by
+    /// the priming poll so Electron/browser web trees actually populate.
+    public func shouldContinue(attempt: Int, hasWebContent: Bool) -> Bool {
+        if hasWebContent { return false }
         return attempt < maxAttempts
     }
 

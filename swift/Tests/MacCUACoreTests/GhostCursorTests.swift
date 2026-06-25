@@ -367,6 +367,18 @@ final class GhostCursorTests: XCTestCase {
         XCTAssertEqual(c2.y, 16.2, accuracy: 1e-9)
     }
 
+    func testGlideDurationScalesWithDistanceAndClamps() {
+        // Monotonic in distance: a small base for tiny nudges, longer for far jumps.
+        XCTAssertEqual(GhostAnimationParams.glideDuration(forDistance: 0), 0.11, accuracy: 1e-9)
+        XCTAssertEqual(GhostAnimationParams.glideDuration(forDistance: 220), 0.21, accuracy: 1e-9)
+        XCTAssertGreaterThan(
+            GhostAnimationParams.glideDuration(forDistance: 1000),
+            GhostAnimationParams.glideDuration(forDistance: 100))
+        // Clamped so even cross-screen jumps stay snappy; negatives floor at base.
+        XCTAssertEqual(GhostAnimationParams.glideDuration(forDistance: 99_999), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(GhostAnimationParams.glideDuration(forDistance: -50), 0.11, accuracy: 1e-9)
+    }
+
     func testWiggleRotationPhases() {
         // Sine wave: 0 at t=0, peak +amplitude at quarter period, 0 at half period.
         XCTAssertEqual(GhostAnimationGeometry.wiggleRotation(atPhase: 0), 0, accuracy: 1e-9)

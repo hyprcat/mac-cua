@@ -39,6 +39,17 @@ public struct GhostCursorStyle: Sendable, Equatable {
     }
 }
 
+/// Which pointer shape the ghost renders — chosen from the accessibility role of
+/// the element the agent is acting on, mirroring the macOS system cursors:
+/// arrow (default), I-beam (text fields/editable text), and pointing hand
+/// (buttons/links/clickable controls). The AppKit overlay maps each to the real
+/// Bibata-Modern pointer outline.
+public enum GhostCursorKind: String, Sendable, Equatable {
+    case arrow
+    case ibeam
+    case hand
+}
+
 /// The default rotating palette (distinct, high-contrast translucent tints).
 public enum GhostCursorPalette {
     public static let styles: [GhostCursorStyle] = [
@@ -77,6 +88,8 @@ public protocol GhostCursorOverlay: AnyObject {
     /// Clip the ghost to the window's still-visible rectilinear region (CG-global
     /// rects). An empty region means fully occluded — equivalent to `hide`.
     func setClipRegion(windowId: Int, region: [Rect])
+    /// Switch the rendered pointer shape (arrow / I-beam / hand) — decorative.
+    func setKind(windowId: Int, _ kind: GhostCursorKind)
 }
 
 public extension GhostCursorOverlay {
@@ -84,6 +97,7 @@ public extension GhostCursorOverlay {
     func highlight(windowId: Int, bounds: Rect) {}
     func setThinking(windowId: Int, active: Bool) {}
     func setClipRegion(windowId: Int, region: [Rect]) {}
+    func setKind(windowId: Int, _ kind: GhostCursorKind) {}
 }
 
 // ---------------------------------------------------------------------------
@@ -96,8 +110,17 @@ public extension GhostCursorOverlay {
 
 /// Tunable durations/magnitudes shared by Core (tests) and the AppKit overlay.
 public enum GhostAnimationParams {
-    /// Bezier "scoot" duration when `moveTo(animated: true)`.
+    /// Bezier "scoot" base duration when `moveTo(animated: true)`.
     public static let scootDuration: Double = 0.18
+
+    /// Human-like glide duration for a travel of `distance` points: a small base
+    /// plus a per-point term, clamped so long jumps stay snappy and tiny nudges
+    /// aren't sluggish. Pure/deterministic — the overlay uses this so the ghost's
+    /// pacing feels hand-driven rather than a fixed-time teleport-with-tween.
+    public static func glideDuration(forDistance distance: Double) -> Double {
+        let d = max(0, distance)
+        return min(0.5, 0.11 + d / 2200.0)
+    }
     /// Click ripple duration.
     public static let pulseDuration: Double = 0.35
     /// Peak sprite scale at the apex of a click pulse.
@@ -443,6 +466,13 @@ public final class GhostCursorController: GhostCursorDriving {
     private let palette: [GhostCursorStyle]
     public weak var overlay: GhostCursorOverlay?
 
+    /// Lifecycle hooks for the AppKit window tracker (Kit `KitGhostWindowTracker`),
+    /// which lives in a module Core cannot import. The executable wires these to
+    /// `tracker.track` / `tracker.untrack` so a window starts/stops being followed
+    /// (move/resize/occlusion) exactly when its session attaches/tears down.
+    public var onStartTracking: ((Int) -> Void)?
+    public var onStopTracking: ((Int) -> Void)?
+
     private var styles: [Int: GhostCursorStyle] = [:]
     private var frames: [Int: Rect] = [:]
     private var nextStyleIndex = 0
@@ -498,6 +528,7 @@ public final class GhostCursorController: GhostCursorDriving {
         }
         if let windowFrame { frames[windowId] = windowFrame }
         overlay?.show(windowId: windowId, style: style, windowFrame: frames[windowId])
+        onStartTracking?(windowId)
         return style
     }
 
@@ -523,6 +554,11 @@ public final class GhostCursorController: GhostCursorDriving {
     /// Toggle the idle thinking wiggle.
     public func setThinking(windowId: Int, active: Bool) {
         overlay?.setThinking(windowId: windowId, active: active)
+    }
+
+    /// Switch the rendered pointer shape (arrow / I-beam / hand) for a window.
+    public func setKind(windowId: Int, _ kind: GhostCursorKind) {
+        overlay?.setKind(windowId: windowId, kind)
     }
 
     /// Clamp a CG-global rect so it lies entirely within a window frame. Pure.
@@ -576,5 +612,6 @@ public final class GhostCursorController: GhostCursorDriving {
         styles.removeValue(forKey: windowId)
         frames.removeValue(forKey: windowId)
         overlay?.remove(windowId: windowId)
+        onStopTracking?(windowId)
     }
 }

@@ -35,26 +35,50 @@ final class GhostCursorOverlayTests: XCTestCase {
         overlay.remove(windowId: 1)
     }
 
-    func testNoFrameDefersPanelCreation() {
+    func testSingleCursorCreatedRegardlessOfWindowFrame() {
+        // Single desktop-spanning cursor: created on first show even without a
+        // window frame (the panel spans the displays, not a single window).
         let overlay = KitGhostCursorOverlay()
         overlay.show(windowId: 7, style: GhostCursorPalette.styles[0], windowFrame: nil)
-        XCTAssertNil(overlay.panelForTesting(windowId: 7))
-        // No prior entry → setWindowFrame(nil) is a no-op, still no panel.
-        overlay.setWindowFrame(windowId: 7, nil)
-        XCTAssertNil(overlay.panelForTesting(windowId: 7))
-        overlay.remove(windowId: 7)
+        XCTAssertNotNil(overlay.panelForTesting(windowId: 7))
     }
 
-    func testMoveDoesNotCrashAndStaysClamped() {
+    func testSwitchingAllPointerKindsDoesNotCrash() {
+        // Each kind renders a real Bibata outline (parsed from SVG) on the one
+        // shared sprite; switching shape must not throw and keeps the cursor.
+        let overlay = KitGhostCursorOverlay()
+        overlay.show(windowId: 1, style: GhostCursorPalette.styles[0],
+                     windowFrame: Rect(x: 0, y: 0, w: 300, h: 200))
+        for kind in [GhostCursorKind.ibeam, .hand, .arrow, .hand, .ibeam] {
+            overlay.setKind(windowId: 1, kind)
+            overlay.move(windowId: 1, to: Point(x: 120, y: 90), animated: true)
+        }
+        XCTAssertNotNil(overlay.panelForTesting(windowId: 1))
+    }
+
+    func testOneCursorSharedAcrossWindowIds() {
+        // Every windowId drives the SAME cursor — one panel that travels apps.
+        let overlay = KitGhostCursorOverlay()
+        overlay.show(windowId: 1, style: GhostCursorPalette.styles[0],
+                     windowFrame: Rect(x: 0, y: 0, w: 300, h: 200))
+        let first = overlay.panelForTesting(windowId: 1)
+        overlay.show(windowId: 2, style: GhostCursorPalette.styles[1],
+                     windowFrame: Rect(x: 500, y: 500, w: 300, h: 200))
+        XCTAssertTrue(first === overlay.panelForTesting(windowId: 2))
+    }
+
+    func testMoveDoesNotCrashAndPersists() {
         let overlay = KitGhostCursorOverlay()
         overlay.show(windowId: 2, style: GhostCursorPalette.styles[1],
                      windowFrame: Rect(x: 0, y: 0, w: 100, h: 100))
-        // Move far outside the window — must not throw; sprite is clamped.
+        // Travel far across the desktop / between apps — must not throw.
         overlay.move(windowId: 2, to: Point(x: 9999, y: -9999), animated: false)
-        overlay.move(windowId: 2, to: Point(x: 50, y: 50), animated: true)
+        overlay.move(windowId: 5, to: Point(x: 50, y: 50), animated: true)
         XCTAssertNotNil(overlay.panelForTesting(windowId: 2))
+        // Persists for the session: per-window remove/hide do NOT tear it down.
         overlay.remove(windowId: 2)
-        XCTAssertNil(overlay.panelForTesting(windowId: 2))
+        overlay.hide(windowId: 2)
+        XCTAssertNotNil(overlay.panelForTesting(windowId: 2))
     }
 }
 #endif

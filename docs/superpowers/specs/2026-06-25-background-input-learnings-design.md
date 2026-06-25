@@ -153,6 +153,17 @@ path posts **window-local** coords + a windowId stamp.
   with the remote-aware variant **when resolved + `electron_remote_observer` flag on**,
   else the public API.
 
+> **Implementation outcome (DORMANT — premise N/A).** During wiring we confirmed
+> mac-cua registers **no** `AXObserver` anywhere: per §5.3 it deliberately
+> replaced the unreliable AXObserver correctness path with polling (`SettlePoller`
+> + liveness-probe re-walk). The occluded-Electron *notification-pause* problem
+> this SPI solves therefore does not arise — there is nothing to upgrade, and
+> wiring an observer would contradict §5.3. The pure plumbing (shim typedef +
+> `RemoteObserverSupport` chooser + tests + `electron_remote_observer` flag)
+> ships as documented, tested, parity-complete capability and is marked dormant;
+> it is the invariant-safe chooser a future optional observer-driven settle
+> *accelerator* would use. Intentionally unwired.
+
 ### Honest framing
 - **Correctness is unchanged** — `RefetchableTree` already treats AX observers as a
   fast-path optimisation, not a correctness gate (re-walk + liveness probe is the

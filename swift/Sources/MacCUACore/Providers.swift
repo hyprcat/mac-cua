@@ -295,11 +295,20 @@ public protocol InputProvider: AnyObject {
     func createEventSource() -> EventSource
 
     /// Click in screenshot-pixel space (window-relative, top-left origin).
+    ///
+    /// `prime` (US-057): when true, the impl fires an off-screen Chromium
+    /// user-activation primer (a discard down/up pair) through the trusted path
+    /// before the real click, so web-content gestures (video play/pause,
+    /// `window.open`, fullscreen) are treated as a trusted continuation. Decided
+    /// by `ClickPrimerPolicy` at the call site and scoped to web-content pixel
+    /// clicks. Off-screen + pid-scoped — never foregrounds (Inv 18). A no-op when
+    /// the trusted SkyLight path is unavailable.
     func clickAt(
         pid: Int, windowId: Int, x: Double, y: Double,
         button: String, count: Int,
         screenshotSize: (width: Int, height: Int)?,
-        source: EventSource?
+        source: EventSource?,
+        prime: Bool
     ) throws
 
     /// Click at an absolute screen point (from an AX frame center).
