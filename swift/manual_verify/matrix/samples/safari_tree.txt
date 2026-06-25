@@ -1,0 +1,1897 @@
+Desktop Automation state (version: 6ad9613a)
+App state retrieved.
+
+<app_state>
+App=com.apple.Safari (pid 7433)
+Window: "GitHub - DietrichGebert/ponytail: Makes your AI agent think like the laziest senior dev in the room. The best code is the code you never wrote. · GitHub", App: Safari.
+
+<app_specific_instructions>
+## Safari Tips
+
+- **Web content is pointer-first:** clickable web elements (links, buttons, inputs) are best driven with `click` — AXPress under-triggers web controls. Use `set_value` on a focused field, or `type_text` after clicking into it.
+- **Address bar:** click the unified URL/search field, then `set_value` the URL (more reliable than `type_text`), then `press_key` Return.
+- **Tabs:** tab buttons live in the toolbar/tab bar; click to switch. New tab is Cmd-T via `press_key`.
+- **Scrolling:** target the web area (the large scrollable element), not an individual link; web content uses point-delta scrolling.
+- **Selecting text:** prefer `select_text` with the visible phrase; web/rich content selection goes through the text-marker tier automatically.
+- **Waiting:** after navigation, use `wait` to let the page settle before reading the tree — content loads asynchronously.
+</app_specific_instructions>
+
+0 standard window GitHub - DietrichGebert/ponytail: Makes your AI agent think like the laziest senior dev in the room. The best code is the code you never wrote. · GitHub, ID: SafariWindow?IsSecure=true&UUID=4BA27F7C-8DBA-4C6D-A727-D68716249054, Secondary Actions: Raise
+	1 split group
+		2 tab group
+			3 scroll area
+				4 HTML content Description: GitHub - DietrichGebert/ponytail: Makes your AI agent think like the laziest senior dev in the room. The best code is the code you never wrote. · GitHub, URL: https://github.com/DietrichGebert/ponytail
+					5 link Skip to content, Secondary Actions: Scroll To Visible
+						6 text Skip to content
+					7 heading Navigation Menu
+						8 text Navigation Menu
+					9 link Homepage, Secondary Actions: Scroll To Visible
+					10 container Global
+						11 list
+							12 container AI CODE CREATION
+DEVELOPER WORKFLOWS
+APPLICATION SECURITY
+EXPLORE
+								13 button Platform, Secondary Actions: Scroll To Visible
+							14 container BY COMPANY SIZE
+BY USE CASE
+BY INDUSTRY
+								15 button Solutions, Secondary Actions: Scroll To Visible
+							16 container EXPLORE BY TOPIC
+EXPLORE BY TYPE
+SUPPORT & SERVICES
+								17 button Resources, Secondary Actions: Scroll To Visible
+							18 container COMMUNITY
+PROGRAMS
+REPOSITORIES
+								19 button Open Source, Secondary Actions: Scroll To Visible
+							20 container ENTERPRISE SOLUTIONS
+AVAILABLE ADD-ONS
+								21 button Enterprise, Secondary Actions: Scroll To Visible
+							22 link Pricing, Secondary Actions: Scroll To Visible
+								23 text Pricing
+					24 pop-up button Search or jump to…, Placeholder: Search or jump to..., Secondary Actions: Scroll To Visible
+					25 link Sign in, Secondary Actions: Scroll To Visible
+						26 text Sign in
+					27 link Sign up, Secondary Actions: Scroll To Visible
+						28 text Sign up
+					29 pop-up button Appearance settings, Secondary Actions: Scroll To Visible
+					30 link DietrichGebert, Secondary Actions: Scroll To Visible
+						31 text DietrichGebert
+					32 text /
+					33 link ponytail, Secondary Actions: Scroll To Visible
+						34 text ponytail
+					35 text Public
+					36 link Sponsor @DietrichGebert, Secondary Actions: Scroll To Visible
+						37 text Sponsor
+					38 link You must be signed in to change notification settings, Secondary Actions: Scroll To Visible
+						39 text Notifications
+					40 link Fork 2.8k, Secondary Actions: Scroll To Visible
+						41 text Fork 2.8k
+					42 link You must be signed in to star a repository, Secondary Actions: Scroll To Visible
+						43 text Star
+						44 container 56052 users starred this repository, Help: 56,052
+							45 text 56.1k
+					46 container Repository
+						47 list
+							48 link Code, Secondary Actions: Scroll To Visible
+								49 text Code
+							50 link Issues 24, Secondary Actions: Scroll To Visible
+								51 text Issues 24
+							52 link Pull requests 47, Secondary Actions: Scroll To Visible
+								53 text Pull requests 47
+							54 link Actions, Secondary Actions: Scroll To Visible
+								55 text Actions
+							56 link Projects, Secondary Actions: Scroll To Visible
+								57 text Projects
+							58 link Security and quality, Secondary Actions: Scroll To Visible
+								59 text Security and quality
+							60 link Insights, Secondary Actions: Scroll To Visible
+								61 text Insights
+					62 heading DietrichGebert/ponytail
+						63 text DietrichGebert/ponytail
+					64 pop-up button main branch, Secondary Actions: Scroll To Visible
+					65 link 23 Branches, Secondary Actions: Scroll To Visible
+						66 text 23 Branches
+					67 link 13 Tags, Secondary Actions: Scroll To Visible
+						68 text 13 Tags
+					69 combo box (settable, string) Go to file, Placeholder: Go to file, Secondary Actions: Scroll To Visible
+						70 text Go to file
+					71 pop-up button Code, Secondary Actions: Scroll To Visible
+					72 heading Folders and files
+						73 text Folders and files
+					74 table Folders and files
+						75 row (selectable) Secondary Actions: ShowMenu, Scroll To Visible
+							76 cell
+								77 text Name
+							78 cell
+								79 text Last commit message
+							80 cell
+								81 text Last commit date
+						82 row (selectable) Secondary Actions: ShowMenu, Scroll To Visible
+							83 cell
+								84 heading Latest commit
+									85 text Latest commit
+								86 image Description: DietrichGebert
+								87 image Description: claude
+								88 link commits by DietrichGebert, Secondary Actions: Scroll To Visible
+									89 text DietrichGebert
+								90 text and
+								91 link commits by claude, Secondary Actions: Scroll To Visible
+									92 text claude
+								93 link docs: add Star History chart to end of READMEs (, Secondary Actions: Scroll To Visible
+									94 text docs: add Star History chart to end of READMEs (
+								95 link #294, Secondary Actions: Scroll To Visible
+									96 text #294
+								97 link ), Secondary Actions: Scroll To Visible
+									98 text )
+								99 checkbox Open commit details, Value: 0, Secondary Actions: Scroll To Visible
+								100 button success, Secondary Actions: Scroll To Visible
+								101 link Commit a945778, Secondary Actions: Scroll To Visible
+									102 text a945778
+								103 text · 17 hours ago
+History
+								104 text History
+								105 link 131 Commits, Secondary Actions: Scroll To Visible
+									106 text 131 Commits
+						107 row (selectable) Secondary Actions: Scroll To Visible
+							108 cell
+								109 link .agents, (Directory), Help: .agents, Secondary Actions: Scroll To Visible
+									110 text .agents
+							111 cell
+								112 link fix: comprehension-first guard + reuse rung (, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									113 text fix: comprehension-first guard + reuse rung (
+								114 link #245, Secondary Actions: Scroll To Visible
+									115 text #245
+								116 link ,, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									117 text ,
+								118 link #217, Secondary Actions: Scroll To Visible
+									119 text #217
+								120 link ) (, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									121 text ) (
+								122 link #253, Secondary Actions: Scroll To Visible
+									123 text #253
+								124 link ), Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									125 text )
+							126 cell
+								127 text 2 days ago
+						128 row (selectable) Secondary Actions: Scroll To Visible
+							129 cell
+								130 link .claude-plugin, (Directory), Help: .claude-plugin, Secondary Actions: Scroll To Visible
+									131 text .claude-plugin
+							132 cell
+								133 link release: 4.8.3 (, Help: release: 4.8.3 (#286), Secondary Actions: Scroll To Visible
+									134 text release: 4.8.3 (
+								135 link #286, Secondary Actions: Scroll To Visible
+									136 text #286
+								137 link ), Help: release: 4.8.3 (#286), Secondary Actions: Scroll To Visible
+									138 text )
+							139 cell
+								140 text yesterday
+						141 row (selectable) Secondary Actions: Scroll To Visible
+							142 cell
+								143 link .clinerules, (Directory), Help: .clinerules, Secondary Actions: Scroll To Visible
+									144 text .clinerules
+							145 cell
+								146 link fix: comprehension-first guard + reuse rung (, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									147 text fix: comprehension-first guard + reuse rung (
+								148 link #245, Secondary Actions: Scroll To Visible
+									149 text #245
+								150 link ,, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									151 text ,
+								152 link #217, Secondary Actions: Scroll To Visible
+									153 text #217
+								154 link ) (, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									155 text ) (
+								156 link #253, Secondary Actions: Scroll To Visible
+									157 text #253
+								158 link ), Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									159 text )
+							160 cell
+								161 text 2 days ago
+						162 row (selectable) Secondary Actions: Scroll To Visible
+							163 cell
+								164 link .codex-plugin, (Directory), Help: .codex-plugin, Secondary Actions: Scroll To Visible
+									165 text .codex-plugin
+							166 cell
+								167 link release: 4.8.3 (, Help: release: 4.8.3 (#286), Secondary Actions: Scroll To Visible
+									168 text release: 4.8.3 (
+								169 link #286, Secondary Actions: Scroll To Visible
+									170 text #286
+								171 link ), Help: release: 4.8.3 (#286), Secondary Actions: Scroll To Visible
+									172 text )
+							173 cell
+								174 text yesterday
+						175 row (selectable) Secondary Actions: Scroll To Visible
+							176 cell
+								177 link .cursor/rules, (Directory), Help: This path skips through empty directories, Secondary Actions: Scroll To Visible
+									178 text .cursor/rules
+							179 cell
+								180 link fix: comprehension-first guard + reuse rung (, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									181 text fix: comprehension-first guard + reuse rung (
+								182 link #245, Secondary Actions: Scroll To Visible
+									183 text #245
+								184 link ,, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									185 text ,
+								186 link #217, Secondary Actions: Scroll To Visible
+									187 text #217
+								188 link ) (, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									189 text ) (
+								190 link #253, Secondary Actions: Scroll To Visible
+									191 text #253
+								192 link ), Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									193 text )
+							194 cell
+								195 text 2 days ago
+						196 row (selectable) Secondary Actions: Scroll To Visible
+							197 cell
+								198 link .github, (Directory), Help: .github, Secondary Actions: Scroll To Visible
+									199 text .github
+							200 cell
+								201 link release: 4.8.3 (, Help: release: 4.8.3 (#286), Secondary Actions: Scroll To Visible
+									202 text release: 4.8.3 (
+								203 link #286, Secondary Actions: Scroll To Visible
+									204 text #286
+								205 link ), Help: release: 4.8.3 (#286), Secondary Actions: Scroll To Visible
+									206 text )
+							207 cell
+								208 text yesterday
+						209 row (selectable) Secondary Actions: Scroll To Visible
+							210 cell
+								211 link .kiro/steering, (Directory), Help: This path skips through empty directories, Secondary Actions: Scroll To Visible
+									212 text .kiro/steering
+							213 cell
+								214 link fix: comprehension-first guard + reuse rung (, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									215 text fix: comprehension-first guard + reuse rung (
+								216 link #245, Secondary Actions: Scroll To Visible
+									217 text #245
+								218 link ,, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									219 text ,
+								220 link #217, Secondary Actions: Scroll To Visible
+									221 text #217
+								222 link ) (, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									223 text ) (
+								224 link #253, Secondary Actions: Scroll To Visible
+									225 text #253
+								226 link ), Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									227 text )
+							228 cell
+								229 text 2 days ago
+						230 row (selectable) Secondary Actions: Scroll To Visible
+							231 cell
+								232 link .openclaw/skills, (Directory), Help: This path skips through empty directories, Secondary Actions: Scroll To Visible
+									233 text .openclaw/skills
+							234 cell
+								235 link fix: comprehension-first guard + reuse rung (, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									236 text fix: comprehension-first guard + reuse rung (
+								237 link #245, Secondary Actions: Scroll To Visible
+									238 text #245
+								239 link ,, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									240 text ,
+								241 link #217, Secondary Actions: Scroll To Visible
+									242 text #217
+								243 link ) (, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									244 text ) (
+								245 link #253, Secondary Actions: Scroll To Visible
+									246 text #253
+								247 link ), Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									248 text )
+							249 cell
+								250 text 2 days ago
+						251 row (selectable) Secondary Actions: Scroll To Visible
+							252 cell
+								253 link .opencode, (Directory), Help: .opencode, Secondary Actions: Scroll To Visible
+									254 text .opencode
+							255 cell
+								256 link feat: scope npm package as @dietrichgebert/ponytail (, Help: feat: scope npm package as @dietrichgebert/ponytail (#280)
+
+Publish under a scope you own outright instead of opencode-ponytail (which
+sits on a third-party npm account). Matches the GitHub handle and repo.
+publishConfig.access is already public, which scoped public packages need., Secondary Actions: Scroll To Visible
+									257 text feat: scope npm package as @dietrichgebert/ponytail (
+								258 link #280, Secondary Actions: Scroll To Visible
+									259 text #280
+								260 link ), Help: feat: scope npm package as @dietrichgebert/ponytail (#280)
+
+Publish under a scope you own outright instead of opencode-ponytail (which
+sits on a third-party npm account). Matches the GitHub handle and repo.
+publishConfig.access is already public, which scoped public packages need., Secondary Actions: Scroll To Visible
+									261 text )
+							262 cell
+								263 text yesterday
+						264 row (selectable) Secondary Actions: Scroll To Visible
+							265 cell
+								266 link .windsurf/rules, (Directory), Help: This path skips through empty directories, Secondary Actions: Scroll To Visible
+									267 text .windsurf/rules
+							268 cell
+								269 link fix: comprehension-first guard + reuse rung (, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									270 text fix: comprehension-first guard + reuse rung (
+								271 link #245, Secondary Actions: Scroll To Visible
+									272 text #245
+								273 link ,, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									274 text ,
+								275 link #217, Secondary Actions: Scroll To Visible
+									276 text #217
+								277 link ) (, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									278 text ) (
+								279 link #253, Secondary Actions: Scroll To Visible
+									280 text #253
+								281 link ), Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									282 text )
+							283 cell
+								284 text 2 days ago
+						285 row (selectable) Secondary Actions: Scroll To Visible
+							286 cell
+								287 link assets, (Directory), Help: assets, Secondary Actions: Scroll To Visible
+									288 text assets
+							289 cell
+								290 link docs(readme): add the agentic benchmark chart (, Help: docs(readme): add the agentic benchmark chart (#160)
+
+Grouped bars of LOC, tokens, cost and time as a % of the no-skill baseline
+(lower is leaner/cheaper/faster), plus a separate safety strip (baseline,
+caveman and ponytail 100%; yagni-oneliner 95%). System-gray palette so it reads
+on both GitHub themes. The chart commits landed after #158 had already
+squash-merged, so this brings the chart onto main.
+
+Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									291 text docs(readme): add the agentic benchmark chart (
+								292 link #160, Secondary Actions: Scroll To Visible
+									293 text #160
+								294 link ), Help: docs(readme): add the agentic benchmark chart (#160)
+
+Grouped bars of LOC, tokens, cost and time as a % of the no-skill baseline
+(lower is leaner/cheaper/faster), plus a separate safety strip (baseline,
+caveman and ponytail 100%; yagni-oneliner 95%). System-gray palette so it reads
+on both GitHub themes. The chart commits landed after #158 had already
+squash-merged, so this brings the chart onto main.
+
+Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									295 text )
+							296 cell
+								297 text last week
+						298 row (selectable) Secondary Actions: Scroll To Visible
+							299 cell
+								300 link benchmarks, (Directory), Help: benchmarks, Secondary Actions: Scroll To Visible
+									301 text benchmarks
+							302 cell
+								303 link fix(benchmark): scheme validation to ollama-url (, Help: fix(benchmark): scheme validation to ollama-url (closes #166) (#274)
+
+Add urllib.parse.urlparse to benchmark-local.py and validate that the
+provided --ollama-url uses either the http or https scheme.
+
+Fix arbitrary URI handling where the script could previously access
+local files (file://) or other unsupported protocols. If the scheme
+is invalid, parser.error is called to exit cleanly with a clear message., Secondary Actions: Scroll To Visible
+									304 text fix(benchmark): scheme validation to ollama-url (
+								305 container This commit closes issue #166.
+									306 link closes, Help: fix(benchmark): scheme validation to ollama-url (closes #166) (#274)
+
+Add urllib.parse.urlparse to benchmark-local.py and validate that the
+provided --ollama-url uses either the http or https scheme.
+
+Fix arbitrary URI handling where the script could previously access
+local files (file://) or other unsupported protocols. If the scheme
+is invalid, parser.error is called to exit cleanly with a clear message., Secondary Actions: Scroll To Visible
+										307 text closes
+								308 link #166, Secondary Actions: Scroll To Visible
+									309 text #166
+								310 link ) (, Help: fix(benchmark): scheme validation to ollama-url (closes #166) (#274)
+
+Add urllib.parse.urlparse to benchmark-local.py and validate that the
+provided --ollama-url uses either the http or https scheme.
+
+Fix arbitrary URI handling where the script could previously access
+local files (file://) or other unsupported protocols. If the scheme
+is invalid, parser.error is called to exit cleanly with a clear message., Secondary Actions: Scroll To Visible
+									311 text ) (
+								312 link #274, Secondary Actions: Scroll To Visible
+									313 text #274
+								314 link ), Help: fix(benchmark): scheme validation to ollama-url (closes #166) (#274)
+
+Add urllib.parse.urlparse to benchmark-local.py and validate that the
+provided --ollama-url uses either the http or https scheme.
+
+Fix arbitrary URI handling where the script could previously access
+local files (file://) or other unsupported protocols. If the scheme
+is invalid, parser.error is called to exit cleanly with a clear message., Secondary Actions: Scroll To Visible
+									315 text )
+							316 cell
+								317 text yesterday
+						318 row (selectable) Secondary Actions: Scroll To Visible
+							319 cell
+								320 link commands, (Directory), Help: commands, Secondary Actions: Scroll To Visible
+									321 text commands
+							322 cell
+								323 link feat(skills): add /ponytail-gain measured-impact scoreboard (, Help: feat(skills): add /ponytail-gain measured-impact scoreboard (#108)
+
+A one-shot scoreboard showing ponytail's measured benchmark impact
+(less code, less cost, more speed) as plain ASCII bars, then points to
+/ponytail-debt and /ponytail-audit for this repo's real numbers.
+
+Complements the existing skills rather than duplicating them: debt
+harvests the ponytail: ledger, audit finds what's cuttable, gain shows
+the measured why-it-matters. No per-repo savings number is ever printed
+-- the unbuilt version was never written, so there is no real baseline
+to subtract from in a live repo. The bars carry the published benchmark
+medians (5 tasks, 3 models); per-repo figures come from debt's count.
+
+Ships every adapter the other commands ship: Claude commands/*.toml,
+OpenCode .opencode/command/*.md, OpenClaw skill (generated), Pi command
+registration. Help card, command enumeration, portability table, and
+README updated in the same change.
+
+Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									324 text feat(skills): add /ponytail-gain measured-impact scoreboard (
+								325 link #108, Secondary Actions: Scroll To Visible
+									326 text #108
+								327 link ), Help: feat(skills): add /ponytail-gain measured-impact scoreboard (#108)
+
+A one-shot scoreboard showing ponytail's measured benchmark impact
+(less code, less cost, more speed) as plain ASCII bars, then points to
+/ponytail-debt and /ponytail-audit for this repo's real numbers.
+
+Complements the existing skills rather than duplicating them: debt
+harvests the ponytail: ledger, audit finds what's cuttable, gain shows
+the measured why-it-matters. No per-repo savings number is ever printed
+-- the unbuilt version was never written, so there is no real baseline
+to subtract from in a live repo. The bars carry the published benchmark
+medians (5 tasks, 3 models); per-repo figures come from debt's count.
+
+Ships every adapter the other commands ship: Claude commands/*.toml,
+OpenCode .opencode/command/*.md, OpenClaw skill (generated), Pi command
+registration. Help card, command enumeration, portability table, and
+README updated in the same change.
+
+Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									328 text )
+							329 cell
+								330 text last week
+						331 row (selectable) Secondary Actions: Scroll To Visible
+							332 cell
+								333 link docs, (Directory), Help: docs, Secondary Actions: Scroll To Visible
+									334 text docs
+							335 cell
+								336 link docs: add instructions for usage with Swival (, Help: docs: add instructions for usage with Swival (#264)
+
+This explains how to use Ponytail with Swival., Secondary Actions: Scroll To Visible
+									337 text docs: add instructions for usage with Swival (
+								338 link #264, Secondary Actions: Scroll To Visible
+									339 text #264
+								340 link ), Help: docs: add instructions for usage with Swival (#264)
+
+This explains how to use Ponytail with Swival., Secondary Actions: Scroll To Visible
+									341 text )
+							342 cell
+								343 text yesterday
+						344 row (selectable) Secondary Actions: Scroll To Visible
+							345 cell
+								346 link examples, (Directory), Help: examples, Secondary Actions: Scroll To Visible
+									347 text examples
+							348 cell
+								349 link docs: sweep em dashes out of the active published surface (, Help: docs: sweep em dashes out of the active published surface (#180)
+
+Em dashes crept back into examples, docs/platform-native.md, several READMEs,
+the ponytail-debt skill, and a command file since 88431de. Replaced with plain
+punctuation (commas, matching the house convention), .openclaw mirror
+regenerated. Follows 88431de's scope: leaves untouched the vendored caveman
+SKILL.md and the dated benchmarks/results/ writeups (historical records).
+
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									350 text docs: sweep em dashes out of the active published surface (
+								351 link #180, Secondary Actions: Scroll To Visible
+									352 text #180
+								353 link ), Help: docs: sweep em dashes out of the active published surface (#180)
+
+Em dashes crept back into examples, docs/platform-native.md, several READMEs,
+the ponytail-debt skill, and a command file since 88431de. Replaced with plain
+punctuation (commas, matching the house convention), .openclaw mirror
+regenerated. Follows 88431de's scope: leaves untouched the vendored caveman
+SKILL.md and the dated benchmarks/results/ writeups (historical records).
+
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									354 text )
+							355 cell
+								356 text last week
+						357 row (selectable) Secondary Actions: Scroll To Visible
+							358 cell
+								359 link hooks, (Directory), Help: hooks, Secondary Actions: Scroll To Visible
+									360 text hooks
+							361 cell
+								362 link feat: inject ponytail ruleset into subagents via SubagentStart hook (, Help: feat: inject ponytail ruleset into subagents via SubagentStart hook (#254)
+
+* feat: inject ponytail ruleset into subagents via SubagentStart hook
+
+SessionStart additionalContext is parent-thread only, so every Task-spawned
+agent ran ponytail-unaware. Add a SubagentStart hook that injects the active
+ruleset into each subagent, reusing getPonytailInstructions. Native Claude
+needs the hookSpecificOutput JSON form (not raw stdout), so writeHookOutput
+grows a SubagentStart branch; readMode exposes the live flag.
+
+Workflow- and team-spawned coverage is undocumented upstream; verify in a
+fresh session once installed.
+
+Closes #252
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01H1dMag33yz1Kf1jS24Aira
+
+* fix: address QA round 1 — make hook tests hermetic + cover Codex SubagentStart
+
+QA round 1 (panel + deepseek-v4-pro) found two real test issues:
+- The new subagent block (and the pre-existing claudeEnv block) used a no-op
+  `delete env.PLUGIN_DATA`; run() spreads process.env, so a PLUGIN_DATA /
+  COPILOT_PLUGIN_DATA leaked from the shell would steer writeHookOutput into the
+  codex/copilot branch and silently mis-fire the native-Claude assertions.
+  Fixed at the source: neutralize both vars once at the top, like CLAUDE_CONFIG_DIR.
+- The Codex SubagentStart branch (claude-codex-hooks.json is shared by both plugin
+  manifests) had zero coverage. Added a codex-path assertion.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01H1dMag33yz1Kf1jS24Aira
+
+* fix: use PowerShell-safe command form for SubagentStart hook
+
+Match the post-#265 'node ...; exit 0' form used by the sibling hooks. The old 'command -v node ... || exit 0' form fails tests/hooks-windows.test.js (POSIX-guard and non-blocking asserts) once this branch merges onto current main.
+
+---------
+
+Co-authored-by: Shane McCarron <shane.mccarron@corvexconnect.com>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>
+Co-authored-by: Emeriko <dietrich.gebert@gmail.com>, Secondary Actions: Scroll To Visible
+									363 text feat: inject ponytail ruleset into subagents via SubagentStart hook (
+								364 link #…, Secondary Actions: Scroll To Visible
+									365 text #…
+							366 cell
+								367 text yesterday
+						368 row (selectable) Secondary Actions: Scroll To Visible
+							369 cell
+								370 link pi-extension, (Directory), Help: pi-extension, Secondary Actions: Scroll To Visible
+									371 text pi-extension
+							372 cell
+								373 link fix(pi-extension): guard status bar render when ui has no theme (, Help: fix(pi-extension): guard status bar render when ui has no theme (#279)
+
+syncStatus guarded setStatus but used theme.fg unguarded, so a Pi host
+exposing setStatus without a theme threw TypeError on session_start (and
+agent_start/agent_end/setMode). Require both before rendering.
+
+Add tests for the render path (previously untested) and the theme-absent
+degradation. Follow-up to #275 / #84., Secondary Actions: Scroll To Visible
+									374 text fix(pi-extension): guard status bar render when ui has no theme (
+								375 link #279, Secondary Actions: Scroll To Visible
+									376 text #279
+								377 link ), Help: fix(pi-extension): guard status bar render when ui has no theme (#279)
+
+syncStatus guarded setStatus but used theme.fg unguarded, so a Pi host
+exposing setStatus without a theme threw TypeError on session_start (and
+agent_start/agent_end/setMode). Require both before rendering.
+
+Add tests for the render path (previously untested) and the theme-absent
+degradation. Follow-up to #275 / #84., Secondary Actions: Scroll To Visible
+									378 text )
+							379 cell
+								380 text yesterday
+						381 row (selectable) Secondary Actions: Scroll To Visible
+							382 cell
+								383 link ponytail-mcp, (Directory), Help: ponytail-mcp, Secondary Actions: Scroll To Visible
+									384 text ponytail-mcp
+							385 cell
+								386 link release: 4.8.3 (, Help: release: 4.8.3 (#286), Secondary Actions: Scroll To Visible
+									387 text release: 4.8.3 (
+								388 link #286, Secondary Actions: Scroll To Visible
+									389 text #286
+								390 link ), Help: release: 4.8.3 (#286), Secondary Actions: Scroll To Visible
+									391 text )
+							392 cell
+								393 text yesterday
+						394 row (selectable) Secondary Actions: Scroll To Visible
+							395 cell
+								396 link scripts, (Directory), Help: scripts, Secondary Actions: Scroll To Visible
+									397 text scripts
+							398 cell
+								399 link docs: clarify uninstall run-order + statusLine ceiling (, Help: docs: clarify uninstall run-order + statusLine ceiling (#278)
+
+Follow-up to #228 (issue #226):
+
+- README: state that scripts/uninstall.js must run *before* the host
+  remove command, since the script is itself a plugin file and gets
+  deleted by the removal (or run it from a separate clone).
+- uninstall.js: add a ponytail: comment naming the statusLine match
+  ceiling — substring match + whole-key delete removes a combined
+  (e.g. caveman+ponytail) statusline wholesale; upgrade path noted.
+- Add trailing newline to the file.
+
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									400 text docs: clarify uninstall run-order + statusLine ceiling (
+								401 link #278, Secondary Actions: Scroll To Visible
+									402 text #278
+								403 link ), Help: docs: clarify uninstall run-order + statusLine ceiling (#278)
+
+Follow-up to #228 (issue #226):
+
+- README: state that scripts/uninstall.js must run *before* the host
+  remove command, since the script is itself a plugin file and gets
+  deleted by the removal (or run it from a separate clone).
+- uninstall.js: add a ponytail: comment naming the statusLine match
+  ceiling — substring match + whole-key delete removes a combined
+  (e.g. caveman+ponytail) statusline wholesale; upgrade path noted.
+- Add trailing newline to the file.
+
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									404 text )
+							405 cell
+								406 text yesterday
+						407 row (selectable) Secondary Actions: Scroll To Visible
+							408 cell
+								409 link skills, (Directory), Help: skills, Secondary Actions: Scroll To Visible
+									410 text skills
+							411 cell
+								412 link fix: comprehension-first guard + reuse rung (, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									413 text fix: comprehension-first guard + reuse rung (
+								414 link #245, Secondary Actions: Scroll To Visible
+									415 text #245
+								416 link ,, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									417 text ,
+								418 link #217, Secondary Actions: Scroll To Visible
+									419 text #217
+								420 link ) (, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									421 text ) (
+								422 link #253, Secondary Actions: Scroll To Visible
+									423 text #253
+								424 link ), Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									425 text )
+							426 cell
+								427 text 2 days ago
+						428 row (selectable) Secondary Actions: Scroll To Visible
+							429 cell
+								430 link tests, (Directory), Help: tests, Secondary Actions: Scroll To Visible
+									431 text tests
+							432 cell
+								433 link feat: inject ponytail ruleset into subagents via SubagentStart hook (, Help: feat: inject ponytail ruleset into subagents via SubagentStart hook (#254)
+
+* feat: inject ponytail ruleset into subagents via SubagentStart hook
+
+SessionStart additionalContext is parent-thread only, so every Task-spawned
+agent ran ponytail-unaware. Add a SubagentStart hook that injects the active
+ruleset into each subagent, reusing getPonytailInstructions. Native Claude
+needs the hookSpecificOutput JSON form (not raw stdout), so writeHookOutput
+grows a SubagentStart branch; readMode exposes the live flag.
+
+Workflow- and team-spawned coverage is undocumented upstream; verify in a
+fresh session once installed.
+
+Closes #252
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01H1dMag33yz1Kf1jS24Aira
+
+* fix: address QA round 1 — make hook tests hermetic + cover Codex SubagentStart
+
+QA round 1 (panel + deepseek-v4-pro) found two real test issues:
+- The new subagent block (and the pre-existing claudeEnv block) used a no-op
+  `delete env.PLUGIN_DATA`; run() spreads process.env, so a PLUGIN_DATA /
+  COPILOT_PLUGIN_DATA leaked from the shell would steer writeHookOutput into the
+  codex/copilot branch and silently mis-fire the native-Claude assertions.
+  Fixed at the source: neutralize both vars once at the top, like CLAUDE_CONFIG_DIR.
+- The Codex SubagentStart branch (claude-codex-hooks.json is shared by both plugin
+  manifests) had zero coverage. Added a codex-path assertion.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01H1dMag33yz1Kf1jS24Aira
+
+* fix: use PowerShell-safe command form for SubagentStart hook
+
+Match the post-#265 'node ...; exit 0' form used by the sibling hooks. The old 'command -v node ... || exit 0' form fails tests/hooks-windows.test.js (POSIX-guard and non-blocking asserts) once this branch merges onto current main.
+
+---------
+
+Co-authored-by: Shane McCarron <shane.mccarron@corvexconnect.com>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>
+Co-authored-by: Emeriko <dietrich.gebert@gmail.com>, Secondary Actions: Scroll To Visible
+									434 text feat: inject ponytail ruleset into subagents via SubagentStart hook (
+								435 link #…, Secondary Actions: Scroll To Visible
+									436 text #…
+							437 cell
+								438 text yesterday
+						439 row (selectable) Secondary Actions: Scroll To Visible
+							440 cell
+								441 link .env.example, (File), Help: .env.example, Secondary Actions: Scroll To Visible
+									442 text .env.example
+							443 cell
+								444 link feat: reproducible promptfoo benchmark + 3-model results, Help: feat: reproducible promptfoo benchmark + 3-model results
+
+Commit a promptfoo harness (config + arm prompts + LOC metric + vendored
+caveman SKILL) so anyone can re-run the comparison: no-skill vs caveman vs
+ponytail, across Haiku / Sonnet / Opus, 10 runs per cell, median reported.
+
+Replace the old unreproducible 6-task chart with assets/benchmark-3model.svg
+from this run, and reframe the README to the reproducible numbers: ponytail
+writes 80-94% less code, costs 47-77% less, and runs 3-6x faster than a
+no-skill agent on every model. benchmarks/README.md carries the median tables
+and the reproduce command. Drops nothing that is not measured.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									445 text feat: reproducible promptfoo benchmark + 3-model results
+							446 cell
+								447 text 2 weeks ago
+						448 row (selectable) Secondary Actions: Scroll To Visible
+							449 cell
+								450 link .gitignore, (File), Help: .gitignore, Secondary Actions: Scroll To Visible
+									451 text .gitignore
+							452 cell
+								453 link feat(benchmarks): agentic LOC + safety benchmark answering, Help: feat(benchmarks): agentic LOC + safety benchmark answering #126 (#158)
+
+Rebuild the benchmark to the standard #126 asked for: real headless Claude Code
+sessions (not a bare model) editing a real public repo
+(tiangolo/full-stack-fastapi-template @ cd83fc1, MIT), fair arms (baseline,
+caveman, ponytail, and the "YAGNI + one-liners" prompt), n=4, Haiku 4.5. LOC is
+the git diff; the safety tasks execute the produced code against adversarial
+input.
+
+Results: ponytail -54% LOC mean (up to -94% on over-build features like the
+date/color picker), -22% tokens, -20% cost, -27% time, and never more than
+baseline; 100% safe vs the one-liner prompt's 95% (it dropped a path-traversal
+guard once). caveman writes less code but spends more tokens.
+
+Also fixes a baseline-contamination bug (the ponytail plugin's SessionStart hook
+fired on every arm; now isolated with --setting-sources project,local + per-arm
+--plugin-dir) and a Windows subprocess-timeout hang.
+
+Lead both READMEs with the agentic numbers; demote the single-shot 80-94% to a
+labelled "isolated generation" note; supersede the contaminated 2026-06-17
+writeup. Dead react-app fixture left untracked.
+
+Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									454 text feat(benchmarks): agentic LOC + safety benchmark answering
+								455 link #126, Secondary Actions: Scroll To Visible
+									456 text #126
+								457 link (, Help: feat(benchmarks): agentic LOC + safety benchmark answering #126 (#158)
+
+Rebuild the benchmark to the standard #126 asked for: real headless Claude Code
+sessions (not a bare model) editing a real public repo
+(tiangolo/full-stack-fastapi-template @ cd83fc1, MIT), fair arms (baseline,
+caveman, ponytail, and the "YAGNI + one-liners" prompt), n=4, Haiku 4.5. LOC is
+the git diff; the safety tasks execute the produced code against adversarial
+input.
+
+Results: ponytail -54% LOC mean (up to -94% on over-build features like the
+date/color picker), -22% tokens, -20% cost, -27% time, and never more than
+baseline; 100% safe vs the one-liner prompt's 95% (it dropped a path-traversal
+guard once). caveman writes less code but spends more tokens.
+
+Also fixes a baseline-contamination bug (the ponytail plugin's SessionStart hook
+fired on every arm; now isolated with --setting-sources project,local + per-arm
+--plugin-dir) and a Windows subprocess-timeout hang.
+
+Lead both READMEs with the agentic numbers; demote the single-shot 80-94% to a
+labelled "isolated generation" note; supersede the contaminated 2026-06-17
+writeup. Dead react-app fixture left untracked.
+
+Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									458 text (
+								459 link #158, Secondary Actions: Scroll To Visible
+									460 text #158
+								461 link ), Help: feat(benchmarks): agentic LOC + safety benchmark answering #126 (#158)
+
+Rebuild the benchmark to the standard #126 asked for: real headless Claude Code
+sessions (not a bare model) editing a real public repo
+(tiangolo/full-stack-fastapi-template @ cd83fc1, MIT), fair arms (baseline,
+caveman, ponytail, and the "YAGNI + one-liners" prompt), n=4, Haiku 4.5. LOC is
+the git diff; the safety tasks execute the produced code against adversarial
+input.
+
+Results: ponytail -54% LOC mean (up to -94% on over-build features like the
+date/color picker), -22% tokens, -20% cost, -27% time, and never more than
+baseline; 100% safe vs the one-liner prompt's 95% (it dropped a path-traversal
+guard once). caveman writes less code but spends more tokens.
+
+Also fixes a baseline-contamination bug (the ponytail plugin's SessionStart hook
+fired on every arm; now isolated with --setting-sources project,local + per-arm
+--plugin-dir) and a Windows subprocess-timeout hang.
+
+Lead both READMEs with the agentic numbers; demote the single-shot 80-94% to a
+labelled "isolated generation" note; supersede the contaminated 2026-06-17
+writeup. Dead react-app fixture left untracked.
+
+Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									462 text )
+							463 cell
+								464 text last week
+						465 row (selectable) Secondary Actions: Scroll To Visible
+							466 cell
+								467 link AGENTS.md, (File), Help: AGENTS.md, Secondary Actions: Scroll To Visible
+									468 text AGENTS.md
+							469 cell
+								470 link fix: comprehension-first guard + reuse rung (, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									471 text fix: comprehension-first guard + reuse rung (
+								472 link #245, Secondary Actions: Scroll To Visible
+									473 text #245
+								474 link ,, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									475 text ,
+								476 link #217, Secondary Actions: Scroll To Visible
+									477 text #217
+								478 link ) (, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									479 text ) (
+								480 link #253, Secondary Actions: Scroll To Visible
+									481 text #253
+								482 link ), Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operational "fix the root cause, not the
+symptom" directive — grep every caller of the function you touch and fix the
+shared function once (the smaller diff). Validated on the agentic benchmark: on
+a shared-helper bug-fix trap, baseline fixes the root cause 1/6 while ponytail
+does 6/6 on both Sonnet 4.6 (the model the issue was filed on) and Opus 4.8,
+verified by reading the produced code. Plain prose ("trace the flow") did not
+move it; the actionable, lazy-framed directive did.
+
+#217 "Missing rung": add ladder rung 2 "Already in this codebase? Reuse it,
+don't re-write it." Propagated across SKILL.md, AGENTS.md, all agent mirror
+copies, the hook fallback, and both READMEs (check-rule-copies passes).
+
+Benchmark: 4 new deterministic quality-tier tasks (reuse-slug, reuse-money,
+trace-transfer, trace-amount) with selftest-proven good/bad refs; harness gains
+multi-file seed support in --selftest, distinctive-behaviour reuse detection,
+and counts in-file __main__/demo() self-checks as test LOC (not source bloat)
+for surgical tasks. Full writeup in
+benchmarks/results/2026-06-22-issue-245-217-comprehension.md.
+
+Also carries the in-progress todo-null benchmark task already present in the
+working tree.
+
+Co-authored-by: Dietrich Gebert <dgebert@Dietrichs-MacBook-Pro.local>
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									483 text )
+							484 cell
+								485 text 2 days ago
+						486 row (selectable) Secondary Actions: Scroll To Visible
+							487 cell
+								488 link LICENSE, (File), Help: LICENSE, Secondary Actions: Scroll To Visible
+									489 text LICENSE
+							490 cell
+								491 link Initial commit, Help: Initial commit, Secondary Actions: Scroll To Visible
+									492 text Initial commit
+							493 cell
+								494 text 2 weeks ago
+						495 row (selectable) Secondary Actions: Scroll To Visible
+							496 cell
+								497 link README.es.md, (File), Help: README.es.md, Secondary Actions: Scroll To Visible
+									498 text README.es.md
+							499 cell
+								500 link docs: add Star History chart to end of READMEs (, Help: docs: add Star History chart to end of READMEs (#294)
+
+Appends a star-history.com chart (light/dark via <picture>) to the end of
+the English, Spanish, and Korean READMEs. Heading follows each file's
+convention: translated in Spanish ("Historial de estrellas"), English
+elsewhere.
+
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									501 text docs: add Star History chart to end of READMEs (
+								502 link #294, Secondary Actions: Scroll To Visible
+									503 text #294
+								504 link ), Help: docs: add Star History chart to end of READMEs (#294)
+
+Appends a star-history.com chart (light/dark via <picture>) to the end of
+the English, Spanish, and Korean READMEs. Heading follows each file's
+convention: translated in Spanish ("Historial de estrellas"), English
+elsewhere.
+
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									505 text )
+							506 cell
+								507 text 17 hours ago
+						508 row (selectable) Secondary Actions: Scroll To Visible
+							509 cell
+								510 link README.ko.md, (File), Help: README.ko.md, Secondary Actions: Scroll To Visible
+									511 text README.ko.md
+							512 cell
+								513 link docs: add Star History chart to end of READMEs (, Help: docs: add Star History chart to end of READMEs (#294)
+
+Appends a star-history.com chart (light/dark via <picture>) to the end of
+the English, Spanish, and Korean READMEs. Heading follows each file's
+convention: translated in Spanish ("Historial de estrellas"), English
+elsewhere.
+
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									514 text docs: add Star History chart to end of READMEs (
+								515 link #294, Secondary Actions: Scroll To Visible
+									516 text #294
+								517 link ), Help: docs: add Star History chart to end of READMEs (#294)
+
+Appends a star-history.com chart (light/dark via <picture>) to the end of
+the English, Spanish, and Korean READMEs. Heading follows each file's
+convention: translated in Spanish ("Historial de estrellas"), English
+elsewhere.
+
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									518 text )
+							519 cell
+								520 text 17 hours ago
+						521 row (selectable) Secondary Actions: Scroll To Visible
+							522 cell
+								523 link README.md, (File), Help: README.md, Secondary Actions: Scroll To Visible
+									524 text README.md
+							525 cell
+								526 link docs: add Star History chart to end of READMEs (, Help: docs: add Star History chart to end of READMEs (#294)
+
+Appends a star-history.com chart (light/dark via <picture>) to the end of
+the English, Spanish, and Korean READMEs. Heading follows each file's
+convention: translated in Spanish ("Historial de estrellas"), English
+elsewhere.
+
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									527 text docs: add Star History chart to end of READMEs (
+								528 link #294, Secondary Actions: Scroll To Visible
+									529 text #294
+								530 link ), Help: docs: add Star History chart to end of READMEs (#294)
+
+Appends a star-history.com chart (light/dark via <picture>) to the end of
+the English, Spanish, and Korean READMEs. Heading follows each file's
+convention: translated in Spanish ("Historial de estrellas"), English
+elsewhere.
+
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>, Secondary Actions: Scroll To Visible
+									531 text )
+							532 cell
+								533 text 17 hours ago
+						534 row (selectable) Secondary Actions: Scroll To Visible
+							535 cell
+								536 link gemini-extension.json, (File), Help: gemini-extension.json, Secondary Actions: Scroll To Visible
+									537 text gemini-extension.json
+							538 cell
+								539 link release: 4.8.3 (, Help: release: 4.8.3 (#286), Secondary Actions: Scroll To Visible
+									540 text release: 4.8.3 (
+								541 link #286, Secondary Actions: Scroll To Visible
+									542 text #286
+								543 link ), Help: release: 4.8.3 (#286), Secondary Actions: Scroll To Visible
+									544 text )
+							545 cell
+								546 text yesterday
+						547 row (selectable) Secondary Actions: Scroll To Visible
+							548 cell
+								549 link opencode.json, (File), Help: opencode.json, Secondary Actions: Scroll To Visible
+									550 text opencode.json
+							551 cell
+								552 link feat: add OpenCode adapter, Help: feat: add OpenCode adapter
+
+Thin OpenCode plugin injecting the ponytail ruleset via experimental.chat.system.transform, reusing the shared instruction builder. Verified end-to-end on OpenCode 1.17.4. Supersedes #15., Secondary Actions: Scroll To Visible
+									553 text feat: add OpenCode adapter
+							554 cell
+								555 text 2 weeks ago
+						556 row (selectable) Secondary Actions: Scroll To Visible
+							557 cell
+								558 link package.json, (File), Help: package.json, Secondary Actions: Scroll To Visible
+									559 text package.json
+							560 cell
+								561 link release: 4.8.3 (, Help: release: 4.8.3 (#286), Secondary Actions: Scroll To Visible
+									562 text release: 4.8.3 (
+								563 link #286, Secondary Actions: Scroll To Visible
+									564 text #286
+								565 link ), Help: release: 4.8.3 (#286), Secondary Actions: Scroll To Visible
+									566 text )
+							567 cell
+								568 text yesterday
+						569 cell
+							570 text Name
+						571 cell
+							572 heading Latest commit
+								573 text Latest commit
+							574 image Description: DietrichGebert
+							575 image Description: claude
+							576 link commits by DietrichGebert, Secondary Actions: Scroll To Visible
+								577 text DietrichGebert
+							578 text and
+							579 link commits by claude, Secondary Actions: Scroll To Visible
+								580 text claude
+							581 link docs: add Star History chart to end of READMEs (, Secondary Actions: Scroll To Visible
+								582 text docs: add Star History chart to end of READMEs (
+							583 link #294, Secondary Actions: Scroll To Visible
+								584 text #294
+							585 link ), Secondary Actions: Scroll To Visible
+								586 text )
+							587 checkbox Open commit details, Value: 0, Secondary Actions: Scroll To Visible
+							588 button success, Secondary Actions: Scroll To Visible
+							589 link Commit a945778, Secondary Actions: Scroll To Visible
+								590 text a945778
+							591 text · 17 hours ago
+History
+							592 text History
+							593 link 131 Commits, Secondary Actions: Scroll To Visible
+								594 text 131 Commits
+						595 cell
+							596 link .agents, (Directory), Help: .agents, Secondary Actions: Scroll To Visible
+								597 text .agents
+						598 cell
+							599 link .claude-plugin, (Directory), Help: .claude-plugin, Secondary Actions: Scroll To Visible
+								600 text .claude-plugin
+						601 cell
+							602 link .clinerules, (Directory), Help: .clinerules, Secondary Actions: Scroll To Visible
+								603 text .clinerules
+						604 cell
+							605 link .codex-plugin, (Directory), Help: .codex-plugin, Secondary Actions: Scroll To Visible
+								606 text .codex-plugin
+						607 cell
+							608 link .cursor/rules, (Directory), Help: This path skips through empty directories, Secondary Actions: Scroll To Visible
+								609 text .cursor/rules
+						610 cell
+							611 link .github, (Directory), Help: .github, Secondary Actions: Scroll To Visible
+								612 text .github
+						613 cell
+							614 link .kiro/steering, (Directory), Help: This path skips through empty directories, Secondary Actions: Scroll To Visible
+								615 text .kiro/steering
+						616 cell
+							617 link .openclaw/skills, (Directory), Help: This path skips through empty directories, Secondary Actions: Scroll To Visible
+								618 text .openclaw/skills
+						619 cell
+							620 link .opencode, (Directory), Help: .opencode, Secondary Actions: Scroll To Visible
+								621 text .opencode
+						622 cell
+							623 link .windsurf/rules, (Directory), Help: This path skips through empty directories, Secondary Actions: Scroll To Visible
+								624 text .windsurf/rules
+						625 cell
+							626 link assets, (Directory), Help: assets, Secondary Actions: Scroll To Visible
+								627 text assets
+						628 cell
+							629 link benchmarks, (Directory), Help: benchmarks, Secondary Actions: Scroll To Visible
+								630 text benchmarks
+						631 cell
+							632 link commands, (Directory), Help: commands, Secondary Actions: Scroll To Visible
+								633 text commands
+						634 cell
+							635 link docs, (Directory), Help: docs, Secondary Actions: Scroll To Visible
+								636 text docs
+						637 cell
+							638 link examples, (Directory), Help: examples, Secondary Actions: Scroll To Visible
+								639 text examples
+						640 cell
+							641 link hooks, (Directory), Help: hooks, Secondary Actions: Scroll To Visible
+								642 text hooks
+						643 cell
+							644 link pi-extension, (Directory), Help: pi-extension, Secondary Actions: Scroll To Visible
+								645 text pi-extension
+						646 cell
+							647 link ponytail-mcp, (Directory), Help: ponytail-mcp, Secondary Actions: Scroll To Visible
+								648 text ponytail-mcp
+						649 cell
+							650 link scripts, (Directory), Help: scripts, Secondary Actions: Scroll To Visible
+								651 text scripts
+						652 cell
+							653 link skills, (Directory), Help: skills, Secondary Actions: Scroll To Visible
+								654 text skills
+						655 cell
+							656 link tests, (Directory), Help: tests, Secondary Actions: Scroll To Visible
+								657 text tests
+						658 cell
+							659 link .env.example, (File), Help: .env.example, Secondary Actions: Scroll To Visible
+								660 text .env.example
+						661 cell
+							662 link .gitignore, (File), Help: .gitignore, Secondary Actions: Scroll To Visible
+								663 text .gitignore
+						664 cell
+							665 link AGENTS.md, (File), Help: AGENTS.md, Secondary Actions: Scroll To Visible
+								666 text AGENTS.md
+						667 cell
+							668 link LICENSE, (File), Help: LICENSE, Secondary Actions: Scroll To Visible
+								669 text LICENSE
+						670 cell
+							671 link README.es.md, (File), Help: README.es.md, Secondary Actions: Scroll To Visible
+								672 text README.es.md
+						673 cell
+							674 link README.ko.md, (File), Help: README.ko.md, Secondary Actions: Scroll To Visible
+								675 text README.ko.md
+						676 cell
+							677 link README.md, (File), Help: README.md, Secondary Actions: Scroll To Visible
+								678 text README.md
+						679 cell
+							680 link gemini-extension.json, (File), Help: gemini-extension.json, Secondary Actions: Scroll To Visible
+								681 text gemini-extension.json
+						682 cell
+							683 link opencode.json, (File), Help: opencode.json, Secondary Actions: Scroll To Visible
+								684 text opencode.json
+						685 cell
+							686 link package.json, (File), Help: package.json, Secondary Actions: Scroll To Visible
+								687 text package.json
+						688 cell
+							689 text Last commit message
+						690 cell
+							691 heading Latest commit
+								692 text Latest commit
+							693 image Description: DietrichGebert
+							694 image Description: claude
+							695 link commits by DietrichGebert, Secondary Actions: Scroll To Visible
+								696 text DietrichGebert
+							697 text and
+							698 link commits by claude, Secondary Actions: Scroll To Visible
+								699 text claude
+							700 link docs: add Star History chart to end of READMEs (, Secondary Actions: Scroll To Visible
+								701 text docs: add Star History chart to end of READMEs (
+							702 link #294, Secondary Actions: Scroll To Visible
+								703 text #294
+							704 link ), Secondary Actions: Scroll To Visible
+								705 text )
+							706 checkbox Open commit details, Value: 0, Secondary Actions: Scroll To Visible
+							707 button success, Secondary Actions: Scroll To Visible
+							708 link Commit a945778, Secondary Actions: Scroll To Visible
+								709 text a945778
+							710 text · 17 hours ago
+History
+							711 text History
+							712 link 131 Commits, Secondary Actions: Scroll To Visible
+								713 text 131 Commits
+						714 cell
+							715 link fix: comprehension-first guard + reuse rung (, Help: fix: comprehension-first guard + reuse rung (#245, #217) (#253)
+
+#245 "Dangerously lazy": add an operation
