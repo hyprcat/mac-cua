@@ -1,0 +1,13 @@
+<!doctype html><html><head><meta charset="utf-8"><title>CUA Test Form</title>
+<style>body{font:16px system-ui;padding:24px;max-width:600px}label{display:block;margin:14px 0 4px}
+input,textarea,select{font-size:16px;padding:6px;width:320px}#out{margin-top:16px;padding:10px;background:#eef;min-height:24px}</style></head>
+<body><h1>CUA Test Form</h1>
+<label>Full name</label><input id="name" type="text">
+<label>Email</label><input id="email" type="email">
+<label>Bio</label><textarea id="bio" rows="3"></textarea>
+<label>Country</label><select id="country"><option>—</option><option>USA</option><option>Canada</option><option>Japan</option></select>
+<label><input id="agree" type="checkbox"> I agree</label>
+<label>Volume <input id="vol" type="range" min="0" max="100" value="20"></label>
+<button id="go" onclick="document.getElementById('out').textContent='SUBMITTED name='+name.value+' email='+email.value+' country='+country.value+' agree='+agree.checked+' vol='+vol.value+' bio='+bio.value">Submit</button>
+<div id="out">waiting…</div>
+</body></html>

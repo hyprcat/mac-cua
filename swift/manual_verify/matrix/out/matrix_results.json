@@ -1,0 +1,84 @@
+{
+  "meta": {
+    "binary_path": "/usr/local/bin/mac-cua",
+    "timestamp": "2026-06-25T14:30:00Z",
+    "macos_version": "macOS 27.0.0 (Darwin)"
+  },
+  "results": [
+    {
+      "app": "TextEdit",
+      "tool": "list_apps",
+      "status": "PASS",
+      "functional": true,
+      "invariant_violations": [],
+      "note": "enumerated 42 apps",
+      "screenshot_path": null
+    },
+    {
+      "app": "TextEdit",
+      "tool": "get_app_state",
+      "status": "PASS",
+      "functional": true,
+      "invariant_violations": [],
+      "note": "tree + screenshot returned",
+      "screenshot_path": null
+    },
+    {
+      "app": "TextEdit",
+      "tool": "type_text",
+      "status": "FAIL",
+      "functional": false,
+      "invariant_violations": [
+        "CURSOR WARP: real cursor moved (120,80)->(640,400)",
+        "FOREGROUND: frontmost changed com.apple.finder->com.apple.TextEdit"
+      ],
+      "note": "text typed but isolation invariants broke",
+      "screenshot_path": null
+    },
+    {
+      "app": "Safari",
+      "tool": "set_value",
+      "status": "PASS",
+      "functional": true,
+      "invariant_violations": [],
+      "note": "URL bar set to https://example.com",
+      "screenshot_path": null
+    },
+    {
+      "app": "Safari",
+      "tool": "scroll",
+      "status": "OBSERVE",
+      "functional": true,
+      "invariant_violations": [],
+      "note": "web-area scrolled; confirm no focus flash",
+      "screenshot_path": "out/safari_scroll.png"
+    },
+    {
+      "app": "VS Code",
+      "tool": "set_value",
+      "status": "N/A",
+      "functional": false,
+      "invariant_violations": [],
+      "note": "Electron rejects set_value (documented incompatibility)",
+      "screenshot_path": null
+    },
+    {
+      "app": "VS Code",
+      "tool": "click",
+      "status": "OBSERVE",
+      "functional": true,
+      "invariant_violations": [],
+      "note": "ghost cursor over editor; confirm overlay renders",
+      "screenshot_path": "out/vscode_click.png"
+    },
+    {
+      "app": "Macs Fan Control",
+      "tool": "get_app_state",
+      "status": "FAIL",
+      "functional": false,
+      "invariant_violations": [],
+      "note": "Qt exposes zero AX; expected clean failure but driver crashed",
+      "screenshot_path": null
+    }
+  ]
+}
