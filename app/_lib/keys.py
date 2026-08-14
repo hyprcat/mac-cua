@@ -39,6 +39,22 @@ _MODIFIER_KEYCODES = [
 
 _KEY_MAP: dict[str, tuple[int, int]] = {}
 
+# Character -> (keycode, flags) for the *active* keyboard layout, installed at
+# runtime by install_layout_map(). _KEY_MAP below is US ANSI, and macOS
+# re-interprets a keycode through the user's layout: on AZERTY, the keycode
+# registered for "a" types "q", and "super+a" becomes Cmd+Q. Consulted first
+# for single characters; empty on failure, which keeps the US behaviour.
+_LAYOUT_MAP: dict[str, tuple[int, int]] = {}
+
+
+def install_layout_map(mapping: dict[str, tuple[int, int]]) -> None:
+    """Install the character map of the active keyboard layout.
+
+    Pass an empty mapping to fall back to the static US ANSI table.
+    """
+    _LAYOUT_MAP.clear()
+    _LAYOUT_MAP.update(mapping)
+
 
 def _reg(names: str | list[str], keycode: int, flags: int = 0) -> None:
     """Register one or more names for a keycode."""
@@ -196,6 +212,14 @@ def parse_key_combo(combo: str) -> tuple[int, int]:
         raise ValueError(
             f"no_non_modifier_keys: combo {combo!r} has only modifiers"
         )
+
+    # Single characters resolve through the active layout first, so "a" is the
+    # key that actually types "a" on this keyboard rather than the US ANSI
+    # keycode. Case matters here: "C" is looked up as-is and already carries
+    # its shift flag, so the auto-shift below must not apply.
+    if len(key_name) == 1 and key_name in _LAYOUT_MAP:
+        keycode, extra_flags = _LAYOUT_MAP[key_name]
+        return keycode, mask | extra_flags
 
     lower_key = key_name.lower()
 

@@ -43,6 +43,7 @@ from Quartz import (
 from Quartz import CGPointMake
 
 from app._lib import screenshot
+from app._lib import keyboard_layout
 from app._lib.errors import InputError, CGEventError
 from app._lib.keys import parse_key_combo
 
@@ -333,6 +334,7 @@ def drag(
 
 
 def press_key(pid: int, key: str, *, source: Any = None) -> None:
+    keyboard_layout.refresh()
     resolved_key = _coerce_text_key(key)
     if resolved_key == " ":
         resolved_key = "space"
@@ -425,6 +427,7 @@ def scroll_pid_pixel(
 
 
 def type_text(pid: int, text: str, *, source: Any = None) -> None:
+    keyboard_layout.refresh()
     for char in text:
         key_name = char
         if char == " ":
@@ -561,6 +564,7 @@ def deliver_type_text(
     via the delivery tap. If check_interrupted is provided and returns True,
     typing stops immediately (mid-stream interruption).
     """
+    keyboard_layout.refresh()
     any_failed = False
     for char in text:
         if check_interrupted is not None and check_interrupted():

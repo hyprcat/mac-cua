@@ -3147,6 +3147,8 @@ class SessionManager:
         if feature_flags.confirmed_delivery and session.delivery_tap is not None and session.input_strategy is not None:
             from app._lib.input import deliver_key_events
             from app._lib.keys import parse_key_combo
+            from app._lib import keyboard_layout
+            keyboard_layout.refresh()
             try:
                 keycode, modifiers = parse_key_combo(resolved_key)
             except ValueError as exc:
